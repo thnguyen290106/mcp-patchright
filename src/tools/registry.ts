@@ -46,6 +46,20 @@ export const tools: Tool[] = [
         },
         colorScheme: { type: "string", enum: ["light", "dark", "no-preference"] },
         cdpEndpoint: { type: "string", description: "Existing Chrome remote debugging endpoint, e.g. http://127.0.0.1:9222" },
+        recordVideo: {
+          description: "Record a video of the whole session. Pass true for defaults, or an object to customize. Saved as .webm; files finalize on browser_close. Not available over cdpEndpoint.",
+          oneOf: [
+            { type: "boolean" },
+            {
+              type: "object",
+              properties: {
+                dir: { type: "string", description: "Output directory. Defaults to ~/.maestro/stealth-playwright-mcp/videos." },
+                width: { type: "number", description: "Video width. Defaults to viewport width." },
+                height: { type: "number", description: "Video height. Defaults to viewport height." },
+              },
+            },
+          ],
+        },
       },
     },
   },
@@ -587,6 +601,40 @@ export const tools: Tool[] = [
     name: "browser_sessionstorage_clear",
     description: "Clear all sessionStorage for the active page's origin.",
     inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "browser_video_save",
+    description: "Direct the active page's session recording to a specific output path (requires the session to have been started with recordVideo). The .webm finalizes when the page or browser closes. Without a path, returns the pending video location.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Target .webm path. If omitted, returns the auto-generated pending path." },
+      },
+    },
+  },
+  {
+    name: "browser_highlight",
+    description: "Draw a persistent highlight overlay around an element (by CSS selector or aria ref). Useful for screenshots and video recording to show what the agent is focusing on. Does not affect page behavior.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...targetProperties,
+        label: { type: "string", description: "Optional text label shown above the highlight; also used as the key for browser_hide_highlight." },
+        style: { type: "string", description: "Optional extra inline CSS for the overlay, e.g. 'outline: 3px dashed lime'." },
+      },
+    },
+  },
+  {
+    name: "browser_hide_highlight",
+    description: "Remove highlight overlays. Pass label/selector/ref to remove a specific one, or omit all to clear every highlight.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        label: { type: "string", description: "Label/key used when the highlight was added." },
+        selector: { type: "string", description: "Selector used when the highlight was added." },
+        ref: { type: "string", description: "aria ref used when the highlight was added." },
+      },
+    },
   },
   {
     name: "browser_save_pdf",

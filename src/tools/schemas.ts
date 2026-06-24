@@ -23,6 +23,14 @@ export const startSchema = z.object({
   }).optional(),
   colorScheme: z.enum(["light", "dark", "no-preference"]).optional(),
   cdpEndpoint: z.string().url().optional(),
+  recordVideo: z.union([
+    z.boolean(),
+    z.object({
+      dir: z.string().optional(),
+      width: z.number().int().positive().optional(),
+      height: z.number().int().positive().optional(),
+    }),
+  ]).optional(),
 });
 
 export const navigateSchema = z.object({
@@ -263,4 +271,21 @@ export const storageKeySetSchema = z.object({
 
 export const storageKeyDeleteSchema = z.object({
   key: z.string().min(1),
+});
+
+// --- Video recording ---
+export const videoSaveSchema = z.object({
+  path: z.string().optional(),
+});
+
+// --- Highlight overlay ---
+export const highlightSchema = targetSchema.extend({
+  label: z.string().optional(),
+  style: z.string().optional(),
+});
+
+export const hideHighlightSchema = z.object({
+  label: z.string().optional(),
+  selector: z.string().optional(),
+  ref: z.string().optional(),
 });

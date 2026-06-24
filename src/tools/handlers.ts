@@ -31,6 +31,9 @@ import {
   storageKeyGetSchema,
   storageKeySetSchema,
   storageKeyDeleteSchema,
+  videoSaveSchema,
+  highlightSchema,
+  hideHighlightSchema,
   evaluateSchema,
   fillSchema,
   navigateSchema,
@@ -147,7 +150,13 @@ export async function handleTool(manager: BrowserManager, name: string, args: un
   switch (name) {
     case "browser_start": {
       const parsed = startSchema.parse(args ?? {});
-      const page = await manager.start(parsed);
+      // Normalize recordVideo: true -> {} (defaults), false -> undefined, object -> object.
+      const { recordVideo, ...rest } = parsed;
+      const normalized = {
+        ...rest,
+        ...(recordVideo === true ? { recordVideo: {} } : recordVideo && typeof recordVideo === "object" ? { recordVideo } : {}),
+      };
+      const page = await manager.start(normalized);
       return text({ ok: true, url: page.url(), status: await manager.status() });
     }
     case "browser_status": {
@@ -568,6 +577,64 @@ export async function handleTool(manager: BrowserManager, name: string, args: un
       await page.evaluate((s: string) => ((window as any)[s] as Storage).clear(), store);
       return text({ ok: true });
     }
+    case "browser_video_save": {
+      const parsed = videoSaveSchema.parse(args ?? {});
+      if (parsed.path) return text(await manager.saveVideoAs(parsed.path));
+      return text(await manager.videoInfo());
+    }
+    case "browser_highlight": {
+      const parsed = highlightSchema.parse(args);
+      const page = await manager.getPage();
+      const key = parsed.label ?? parsed.selector ?? parsed.ref ?? "highlight";
+      await locatorFor(page, parsed).evaluate(
+        (el: Element, opts: { key: string; label?: string; style?: string }) => {
+          let container = document.getElementById("__mcp_hl__");
+          if (!container) {
+            container = document.createElement("div");
+            container.id = "__mcp_hl__";
+            document.body.appendChild(container);
+          }
+          const r = el.getBoundingClientRect();
+          const item = document.createElement("div");
+          item.dataset.key = opts.key;
+          item.style.cssText =
+            `position:absolute;left:${r.left + window.scrollX}px;top:${r.top + window.scrollY}px;` +
+            `width:${r.width}px;height:${r.height}px;pointer-events:none;z-index:2147483647;` +
+            `outline:2px solid #ff3b30;box-shadow:0 0 0 2px rgba(255,59,48,.3);border-radius:2px;${opts.style ?? ""}`;
+          if (opts.label) {
+            const tag = document.createElement("div");
+            tag.textContent = opts.label;
+            tag.style.cssText =
+              "position:absolute;top:-20px;left:0;background:#ff3b30;color:#fff;" +
+              "font:11px/1.4 sans-serif;padding:1px 6px;border-radius:3px;white-space:nowrap;";
+            item.appendChild(tag);
+          }
+          container.appendChild(item);
+        },
+        { key, label: parsed.label, style: parsed.style },
+        { timeout: parsed.timeout ?? 30_000 } as any,
+      );
+      return text({ ok: true, key });
+    }
+    case "browser_hide_highlight": {
+      const parsed = hideHighlightSchema.parse(args ?? {});
+      const page = await manager.getPage();
+      const key = parsed.label ?? parsed.selector ?? parsed.ref ?? null;
+      const removed = await page.evaluate((k: string | null) => {
+        const container = document.getElementById("__mcp_hl__");
+        if (!container) return 0;
+        if (!k) {
+          const n = container.children.length;
+          container.remove();
+          return n;
+        }
+        let n = 0;
+        container.querySelectorAll(`[data-key="${CSS.escape(k)}"]`).forEach((el) => { el.remove(); n++; });
+        if (!container.children.length) container.remove();
+        return n;
+      }, key);
+      return text({ ok: true, removed });
+    }
     case "browser_save_pdf": {
       const parsed = savePdfSchema.parse(args ?? {});
       const page = await manager.getPage();
@@ -593,8 +660,8 @@ export async function handleTool(manager: BrowserManager, name: string, args: un
       }
     }
     case "browser_close": {
-      await manager.close();
-      return text({ ok: true });
+      const { videos } = await manager.close();
+      return text({ ok: true, ...(videos.length ? { videos } : {}) });
     }
     default:
       return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };

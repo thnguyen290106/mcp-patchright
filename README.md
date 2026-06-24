@@ -1,6 +1,6 @@
 # mcp-patchright
 
-🛡️ Undetectable browser MCP server — 56 tools, Patchright-powered, zero CDP fingerprint.
+🛡️ Undetectable browser MCP server — 59 tools, Patchright-powered, zero CDP fingerprint.
 
 [![npm]](https://npmjs.com/mcp-patchright) [![MCP]](https://modelcontextprotocol.io)
 
@@ -52,6 +52,8 @@ mcp-patchright --port 9321 --host 127.0.0.1
 - **Text/HTML extraction** — `browser_get_visible_text` / `_html` (token-light)
 - **Iframe-aware** — pass `frameSelector` to any element tool (click/fill/type/hover/press/wait_for/select/drag) to act inside an iframe
 - **PDF export** — `browser_save_pdf` via CDP (works in headed/stealth mode)
+- **Video recording** — `browser_start` with `recordVideo`, `browser_video_save`; .webm flushed on `browser_close`
+- **Element highlight** — `browser_highlight` / `browser_hide_highlight` overlays for screenshots & recordings
 - **Stealth profiles** — proxy / geolocation / locale / timezone / colorScheme
 - **Console capture** — real-time console message stream
 - **Fingerprint check** — `browser_fingerprint_check` diagnostics
@@ -114,6 +116,9 @@ Full comparison HTML in [/docs/tool-comparison.html](docs/tool-comparison.html).
 - `browser_sessionstorage_set`
 - `browser_sessionstorage_delete`
 - `browser_sessionstorage_clear`
+- `browser_video_save`
+- `browser_highlight`
+- `browser_hide_highlight`
 - `browser_save_pdf`
 - `browser_close`
 
