@@ -222,3 +222,45 @@ export const savePdfSchema = z.object({
   scale: z.number().positive().optional(),
   format: z.enum(["Letter", "Legal", "Tabloid", "A3", "A4", "A5"]).optional(),
 });
+
+// --- Storage: cookies ---
+export const cookieListSchema = z.object({
+  domain: z.string().optional(),
+  path: z.string().optional(),
+});
+
+export const cookieGetSchema = z.object({
+  name: z.string().min(1),
+});
+
+export const cookieSetSchema = z.object({
+  name: z.string().min(1),
+  value: z.string(),
+  url: z.string().url().optional(),
+  domain: z.string().optional(),
+  path: z.string().optional(),
+  expires: z.number().optional(),
+  httpOnly: z.boolean().optional(),
+  secure: z.boolean().optional(),
+  sameSite: z.enum(["Strict", "Lax", "None"]).optional(),
+});
+
+export const cookieDeleteSchema = z.object({
+  name: z.string().min(1),
+  domain: z.string().optional(),
+  path: z.string().optional(),
+});
+
+// --- Storage: localStorage / sessionStorage ---
+export const storageKeyGetSchema = z.object({
+  key: z.string().min(1),
+});
+
+export const storageKeySetSchema = z.object({
+  key: z.string().min(1),
+  value: z.string(),
+});
+
+export const storageKeyDeleteSchema = z.object({
+  key: z.string().min(1),
+});

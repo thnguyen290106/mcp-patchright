@@ -458,6 +458,137 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "browser_cookie_list",
+    description: "List cookies in the current session, optionally filtered by domain and/or path.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        domain: { type: "string", description: "Filter cookies by domain (substring match)." },
+        path: { type: "string", description: "Filter cookies by path (exact match)." },
+      },
+    },
+  },
+  {
+    name: "browser_cookie_get",
+    description: "Get a single cookie by name. Returns null if not present.",
+    inputSchema: {
+      type: "object",
+      properties: { name: { type: "string", description: "Cookie name to get." } },
+      required: ["name"],
+    },
+  },
+  {
+    name: "browser_cookie_set",
+    description: "Set a cookie with optional flags. Provide url, or domain (path defaults to /). If neither given, the active page's origin is used.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        value: { type: "string" },
+        url: { type: "string", description: "URL the cookie applies to. Alternative to domain/path." },
+        domain: { type: "string", description: "Cookie domain, e.g. .example.com" },
+        path: { type: "string", description: "Cookie path, default /." },
+        expires: { type: "number", description: "Expiry as Unix timestamp (seconds). Session cookie if omitted." },
+        httpOnly: { type: "boolean" },
+        secure: { type: "boolean" },
+        sameSite: { type: "string", enum: ["Strict", "Lax", "None"] },
+      },
+      required: ["name", "value"],
+    },
+  },
+  {
+    name: "browser_cookie_delete",
+    description: "Delete cookies by name, optionally narrowed by domain/path.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Cookie name to delete." },
+        domain: { type: "string" },
+        path: { type: "string" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "browser_cookie_clear",
+    description: "Clear all cookies in the current session.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "browser_localstorage_list",
+    description: "List all localStorage key-value pairs for the active page's origin.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "browser_localstorage_get",
+    description: "Get a localStorage item by key. Returns null if absent.",
+    inputSchema: {
+      type: "object",
+      properties: { key: { type: "string" } },
+      required: ["key"],
+    },
+  },
+  {
+    name: "browser_localstorage_set",
+    description: "Set a localStorage item on the active page's origin.",
+    inputSchema: {
+      type: "object",
+      properties: { key: { type: "string" }, value: { type: "string" } },
+      required: ["key", "value"],
+    },
+  },
+  {
+    name: "browser_localstorage_delete",
+    description: "Delete a localStorage item by key.",
+    inputSchema: {
+      type: "object",
+      properties: { key: { type: "string" } },
+      required: ["key"],
+    },
+  },
+  {
+    name: "browser_localstorage_clear",
+    description: "Clear all localStorage for the active page's origin.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "browser_sessionstorage_list",
+    description: "List all sessionStorage key-value pairs for the active page's origin.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "browser_sessionstorage_get",
+    description: "Get a sessionStorage item by key. Returns null if absent.",
+    inputSchema: {
+      type: "object",
+      properties: { key: { type: "string" } },
+      required: ["key"],
+    },
+  },
+  {
+    name: "browser_sessionstorage_set",
+    description: "Set a sessionStorage item on the active page's origin.",
+    inputSchema: {
+      type: "object",
+      properties: { key: { type: "string" }, value: { type: "string" } },
+      required: ["key", "value"],
+    },
+  },
+  {
+    name: "browser_sessionstorage_delete",
+    description: "Delete a sessionStorage item by key.",
+    inputSchema: {
+      type: "object",
+      properties: { key: { type: "string" } },
+      required: ["key"],
+    },
+  },
+  {
+    name: "browser_sessionstorage_clear",
+    description: "Clear all sessionStorage for the active page's origin.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "browser_save_pdf",
     description: "Render the active page to PDF via CDP (works in headed/stealth mode). Saves to path, or returns base64 if path omitted.",
     inputSchema: {

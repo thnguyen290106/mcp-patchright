@@ -24,6 +24,13 @@ import {
   routeMockSchema,
   storageSaveSchema,
   storageLoadSchema,
+  cookieListSchema,
+  cookieGetSchema,
+  cookieSetSchema,
+  cookieDeleteSchema,
+  storageKeyGetSchema,
+  storageKeySetSchema,
+  storageKeyDeleteSchema,
   evaluateSchema,
   fillSchema,
   navigateSchema,
@@ -455,6 +462,111 @@ export async function handleTool(manager: BrowserManager, name: string, args: un
         originsApplied++;
       }
       return text({ ok: true, cookies: state.cookies?.length ?? 0, origins: originsApplied });
+    }
+    case "browser_cookie_list": {
+      const parsed = cookieListSchema.parse(args ?? {});
+      const page = await manager.getPage();
+      let cookies = await page.context().cookies();
+      if (parsed.domain) cookies = cookies.filter((c) => c.domain.includes(parsed.domain!));
+      if (parsed.path) cookies = cookies.filter((c) => c.path === parsed.path);
+      return text({ ok: true, count: cookies.length, cookies });
+    }
+    case "browser_cookie_get": {
+      const parsed = cookieGetSchema.parse(args);
+      const page = await manager.getPage();
+      const cookie = (await page.context().cookies()).find((c) => c.name === parsed.name) ?? null;
+      return text({ ok: true, cookie });
+    }
+    case "browser_cookie_set": {
+      const parsed = cookieSetSchema.parse(args);
+      const page = await manager.getPage();
+      const cookie: Record<string, unknown> = { name: parsed.name, value: parsed.value };
+      if (parsed.url) cookie.url = parsed.url;
+      if (parsed.domain) { cookie.domain = parsed.domain; cookie.path = parsed.path ?? "/"; }
+      // Fall back to the active page's origin when neither url nor domain is given.
+      if (!parsed.url && !parsed.domain) {
+        const current = page.url();
+        if (!current || current === "about:blank") {
+          return text({ ok: false, error: "Provide url or domain (no active origin to infer from)." });
+        }
+        cookie.url = current;
+      }
+      if (parsed.expires !== undefined) cookie.expires = parsed.expires;
+      if (parsed.httpOnly !== undefined) cookie.httpOnly = parsed.httpOnly;
+      if (parsed.secure !== undefined) cookie.secure = parsed.secure;
+      if (parsed.sameSite !== undefined) cookie.sameSite = parsed.sameSite;
+      await page.context().addCookies([cookie as any]);
+      return text({ ok: true });
+    }
+    case "browser_cookie_delete": {
+      const parsed = cookieDeleteSchema.parse(args);
+      const page = await manager.getPage();
+      await page.context().clearCookies({
+        name: parsed.name,
+        ...(parsed.domain ? { domain: parsed.domain } : {}),
+        ...(parsed.path ? { path: parsed.path } : {}),
+      });
+      return text({ ok: true });
+    }
+    case "browser_cookie_clear": {
+      const page = await manager.getPage();
+      await page.context().clearCookies();
+      return text({ ok: true });
+    }
+    case "browser_localstorage_list":
+    case "browser_sessionstorage_list": {
+      const store = name === "browser_localstorage_list" ? "localStorage" : "sessionStorage";
+      const page = await manager.getPage();
+      const items = await page.evaluate((s: string) => {
+        const target = (window as any)[s] as Storage;
+        const out: Record<string, string> = {};
+        for (let i = 0; i < target.length; i++) {
+          const k = target.key(i);
+          if (k !== null) out[k] = target.getItem(k) ?? "";
+        }
+        return out;
+      }, store);
+      return text({ ok: true, origin: new URL(page.url()).origin, count: Object.keys(items).length, items });
+    }
+    case "browser_localstorage_get":
+    case "browser_sessionstorage_get": {
+      const store = name === "browser_localstorage_get" ? "localStorage" : "sessionStorage";
+      const parsed = storageKeyGetSchema.parse(args);
+      const page = await manager.getPage();
+      const value = await page.evaluate(
+        (o: { s: string; key: string }) => ((window as any)[o.s] as Storage).getItem(o.key),
+        { s: store, key: parsed.key },
+      );
+      return text({ ok: true, key: parsed.key, value });
+    }
+    case "browser_localstorage_set":
+    case "browser_sessionstorage_set": {
+      const store = name === "browser_localstorage_set" ? "localStorage" : "sessionStorage";
+      const parsed = storageKeySetSchema.parse(args);
+      const page = await manager.getPage();
+      await page.evaluate(
+        (o: { s: string; key: string; value: string }) => ((window as any)[o.s] as Storage).setItem(o.key, o.value),
+        { s: store, key: parsed.key, value: parsed.value },
+      );
+      return text({ ok: true, key: parsed.key });
+    }
+    case "browser_localstorage_delete":
+    case "browser_sessionstorage_delete": {
+      const store = name === "browser_localstorage_delete" ? "localStorage" : "sessionStorage";
+      const parsed = storageKeyDeleteSchema.parse(args);
+      const page = await manager.getPage();
+      await page.evaluate(
+        (o: { s: string; key: string }) => ((window as any)[o.s] as Storage).removeItem(o.key),
+        { s: store, key: parsed.key },
+      );
+      return text({ ok: true, key: parsed.key });
+    }
+    case "browser_localstorage_clear":
+    case "browser_sessionstorage_clear": {
+      const store = name === "browser_localstorage_clear" ? "localStorage" : "sessionStorage";
+      const page = await manager.getPage();
+      await page.evaluate((s: string) => ((window as any)[s] as Storage).clear(), store);
+      return text({ ok: true });
     }
     case "browser_save_pdf": {
       const parsed = savePdfSchema.parse(args ?? {});
