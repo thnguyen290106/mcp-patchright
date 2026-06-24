@@ -28,6 +28,7 @@ export interface StartOptions {
   geolocation?: { latitude: number; longitude: number; accuracy?: number };
   colorScheme?: "light" | "dark" | "no-preference";
   cdpEndpoint?: string;
+  recordVideo?: { dir?: string; width?: number; height?: number };
 }
 
 export interface RouteRule {
@@ -77,9 +78,12 @@ export interface BrowserStatus {
   url?: string;
   title?: string;
   pages: number;
+  recording?: boolean;
+  videoDir?: string;
 }
 
 const DEFAULT_PROFILE_DIR = join(homedir(), ".maestro", "stealth-playwright-mcp", "profiles", "default");
+const DEFAULT_VIDEO_DIR = join(homedir(), ".maestro", "stealth-playwright-mcp", "videos");
 
 export class BrowserManager {
   constructor(private readonly defaultOptions: StartOptions = {}) {}
@@ -93,6 +97,7 @@ export class BrowserManager {
   private engine: BrowserEngine = "patchright";
   private options?: Required<Pick<StartOptions, "browser" | "headless" | "userDataDir">> & StartOptions;
   private startPromise?: Promise<Page>;
+  private videoDir?: string;
   private _networkRequests: NetworkRequest[] = [];
   private _consoleMessages: ConsoleMessage[] = [];
   private _routeRules: (RouteRule & { handler: (route: Route) => unknown })[] = [];
@@ -129,6 +134,7 @@ export class BrowserManager {
         ...(startOptions.colorScheme ? { colorScheme: startOptions.colorScheme } : {}),
       }));
       this.engine = "cdp";
+      this.videoDir = undefined; // recordVideo is unavailable over a CDP attach
       this.options = { ...startOptions, browser: browserName, headless, userDataDir };
       this.registerExistingPages();
       this.context.on("page", (page) => {
@@ -144,6 +150,9 @@ export class BrowserManager {
     await mkdir(userDataDir, { recursive: true });
     await this.removeSingletonFiles(userDataDir);
 
+    this.videoDir = startOptions.recordVideo ? (startOptions.recordVideo.dir ?? DEFAULT_VIDEO_DIR) : undefined;
+    if (this.videoDir) await mkdir(this.videoDir, { recursive: true });
+
     const launcher = browserName === "firefox" ? firefox : browserName === "webkit" ? webkit : chromium;
     this.context = await launcher.launchPersistentContext(userDataDir, {
       ...(browserName === "chromium" ? { channel: startOptions.channel ?? "chrome" } : {}),
@@ -155,6 +164,7 @@ export class BrowserManager {
       ...(startOptions.proxy ? { proxy: startOptions.proxy } : {}),
       ...(startOptions.geolocation ? { geolocation: startOptions.geolocation, permissions: ["geolocation"] } : {}),
       ...(startOptions.colorScheme ? { colorScheme: startOptions.colorScheme } : {}),
+      ...(this.videoDir ? { recordVideo: { dir: this.videoDir, size: { width: startOptions.recordVideo?.width ?? width, height: startOptions.recordVideo?.height ?? height } } } : {}),
     });
     this.engine = "patchright";
     this.options = { ...startOptions, browser: browserName, headless, userDataDir };
@@ -230,7 +240,30 @@ export class BrowserManager {
       url,
       title,
       pages: this.context?.pages().filter((page) => !page.isClosed()).length ?? 0,
+      recording: !!this.videoDir,
+      videoDir: this.videoDir,
     };
+  }
+
+  /** Path of the in-progress video for the active page. File is finalized when the page/context closes. */
+  async videoInfo(): Promise<{ recording: boolean; dir?: string; pendingFile?: string }> {
+    if (!this.videoDir) return { recording: false };
+    const page = this.activePage && !this.activePage.isClosed() ? this.activePage : undefined;
+    const video = page?.video();
+    const pendingFile = video ? await video.path().catch(() => undefined) : undefined;
+    return { recording: true, dir: this.videoDir, pendingFile };
+  }
+
+  /** Request that the active page's video be written to a specific path (finalizes on page/context close). */
+  async saveVideoAs(targetPath: string): Promise<{ ok: boolean; savedTo?: string; pendingFile?: string; error?: string }> {
+    if (!this.videoDir) return { ok: false, error: "Recording is not enabled. Start the session with recordVideo." };
+    const page = await this.getPage();
+    const video = page.video();
+    if (!video) return { ok: false, error: "No video for the active page." };
+    const pendingFile = await video.path().catch(() => undefined);
+    // saveAs resolves only after the page/context closes, so fire-and-forget.
+    video.saveAs(targetPath).catch(() => undefined);
+    return { ok: true, savedTo: targetPath, pendingFile };
   }
 
   trackPage(page: Page): void {
@@ -328,7 +361,17 @@ export class BrowserManager {
     return this._networkRequests.find((request) => request.id === id);
   }
 
-  async close(): Promise<void> {
+  async close(): Promise<{ videos: string[] }> {
+    // Capture pending video paths before tearing down — files are flushed on context close.
+    const videos: string[] = [];
+    if (this.videoDir && this.context) {
+      for (const page of this.context.pages()) {
+        const video = page.video();
+        if (!video) continue;
+        const path = await video.path().catch(() => undefined);
+        if (path) videos.push(path);
+      }
+    }
     await this.context?.close().catch(() => undefined);
     await this.browser?.close().catch(() => undefined);
     this.activePage = undefined;
@@ -336,10 +379,12 @@ export class BrowserManager {
     this.browser = undefined;
     this.startPromise = undefined;
     this.engine = "patchright";
+    this.videoDir = undefined;
     this.pageIds = new WeakMap<Page, string>();
     this.trackedPages = new WeakSet<Page>();
     this.nextPageId = 1;
     this._routeRules = [];
+    return { videos };
   }
 
   private async removeSingletonFiles(userDataDir: string): Promise<void> {

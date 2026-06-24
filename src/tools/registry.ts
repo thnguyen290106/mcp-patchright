@@ -46,6 +46,20 @@ export const tools: Tool[] = [
         },
         colorScheme: { type: "string", enum: ["light", "dark", "no-preference"] },
         cdpEndpoint: { type: "string", description: "Existing Chrome remote debugging endpoint, e.g. http://127.0.0.1:9222" },
+        recordVideo: {
+          description: "Record a video of the whole session. Pass true for defaults, or an object to customize. Saved as .webm; files finalize on browser_close. Not available over cdpEndpoint.",
+          oneOf: [
+            { type: "boolean" },
+            {
+              type: "object",
+              properties: {
+                dir: { type: "string", description: "Output directory. Defaults to ~/.maestro/stealth-playwright-mcp/videos." },
+                width: { type: "number", description: "Video width. Defaults to viewport width." },
+                height: { type: "number", description: "Video height. Defaults to viewport height." },
+              },
+            },
+          ],
+        },
       },
     },
   },
@@ -454,6 +468,171 @@ export const tools: Tool[] = [
       properties: {
         path: { type: "string", description: "Path to a storageState JSON file." },
         state: { type: "object", description: "Inline storageState object ({ cookies, origins })." },
+      },
+    },
+  },
+  {
+    name: "browser_cookie_list",
+    description: "List cookies in the current session, optionally filtered by domain and/or path.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        domain: { type: "string", description: "Filter cookies by domain (substring match)." },
+        path: { type: "string", description: "Filter cookies by path (exact match)." },
+      },
+    },
+  },
+  {
+    name: "browser_cookie_get",
+    description: "Get a single cookie by name. Returns null if not present.",
+    inputSchema: {
+      type: "object",
+      properties: { name: { type: "string", description: "Cookie name to get." } },
+      required: ["name"],
+    },
+  },
+  {
+    name: "browser_cookie_set",
+    description: "Set a cookie with optional flags. Provide url, or domain (path defaults to /). If neither given, the active page's origin is used.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string" },
+        value: { type: "string" },
+        url: { type: "string", description: "URL the cookie applies to. Alternative to domain/path." },
+        domain: { type: "string", description: "Cookie domain, e.g. .example.com" },
+        path: { type: "string", description: "Cookie path, default /." },
+        expires: { type: "number", description: "Expiry as Unix timestamp (seconds). Session cookie if omitted." },
+        httpOnly: { type: "boolean" },
+        secure: { type: "boolean" },
+        sameSite: { type: "string", enum: ["Strict", "Lax", "None"] },
+      },
+      required: ["name", "value"],
+    },
+  },
+  {
+    name: "browser_cookie_delete",
+    description: "Delete cookies by name, optionally narrowed by domain/path.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: { type: "string", description: "Cookie name to delete." },
+        domain: { type: "string" },
+        path: { type: "string" },
+      },
+      required: ["name"],
+    },
+  },
+  {
+    name: "browser_cookie_clear",
+    description: "Clear all cookies in the current session.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "browser_localstorage_list",
+    description: "List all localStorage key-value pairs for the active page's origin.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "browser_localstorage_get",
+    description: "Get a localStorage item by key. Returns null if absent.",
+    inputSchema: {
+      type: "object",
+      properties: { key: { type: "string" } },
+      required: ["key"],
+    },
+  },
+  {
+    name: "browser_localstorage_set",
+    description: "Set a localStorage item on the active page's origin.",
+    inputSchema: {
+      type: "object",
+      properties: { key: { type: "string" }, value: { type: "string" } },
+      required: ["key", "value"],
+    },
+  },
+  {
+    name: "browser_localstorage_delete",
+    description: "Delete a localStorage item by key.",
+    inputSchema: {
+      type: "object",
+      properties: { key: { type: "string" } },
+      required: ["key"],
+    },
+  },
+  {
+    name: "browser_localstorage_clear",
+    description: "Clear all localStorage for the active page's origin.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "browser_sessionstorage_list",
+    description: "List all sessionStorage key-value pairs for the active page's origin.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "browser_sessionstorage_get",
+    description: "Get a sessionStorage item by key. Returns null if absent.",
+    inputSchema: {
+      type: "object",
+      properties: { key: { type: "string" } },
+      required: ["key"],
+    },
+  },
+  {
+    name: "browser_sessionstorage_set",
+    description: "Set a sessionStorage item on the active page's origin.",
+    inputSchema: {
+      type: "object",
+      properties: { key: { type: "string" }, value: { type: "string" } },
+      required: ["key", "value"],
+    },
+  },
+  {
+    name: "browser_sessionstorage_delete",
+    description: "Delete a sessionStorage item by key.",
+    inputSchema: {
+      type: "object",
+      properties: { key: { type: "string" } },
+      required: ["key"],
+    },
+  },
+  {
+    name: "browser_sessionstorage_clear",
+    description: "Clear all sessionStorage for the active page's origin.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "browser_video_save",
+    description: "Direct the active page's session recording to a specific output path (requires the session to have been started with recordVideo). The .webm finalizes when the page or browser closes. Without a path, returns the pending video location.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Target .webm path. If omitted, returns the auto-generated pending path." },
+      },
+    },
+  },
+  {
+    name: "browser_highlight",
+    description: "Draw a persistent highlight overlay around an element (by CSS selector or aria ref). Useful for screenshots and video recording to show what the agent is focusing on. Does not affect page behavior.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...targetProperties,
+        label: { type: "string", description: "Optional text label shown above the highlight; also used as the key for browser_hide_highlight." },
+        style: { type: "string", description: "Optional extra inline CSS for the overlay, e.g. 'outline: 3px dashed lime'." },
+      },
+    },
+  },
+  {
+    name: "browser_hide_highlight",
+    description: "Remove highlight overlays. Pass label/selector/ref to remove a specific one, or omit all to clear every highlight.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        label: { type: "string", description: "Label/key used when the highlight was added." },
+        selector: { type: "string", description: "Selector used when the highlight was added." },
+        ref: { type: "string", description: "aria ref used when the highlight was added." },
       },
     },
   },

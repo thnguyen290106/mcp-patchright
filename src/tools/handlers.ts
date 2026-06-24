@@ -24,6 +24,16 @@ import {
   routeMockSchema,
   storageSaveSchema,
   storageLoadSchema,
+  cookieListSchema,
+  cookieGetSchema,
+  cookieSetSchema,
+  cookieDeleteSchema,
+  storageKeyGetSchema,
+  storageKeySetSchema,
+  storageKeyDeleteSchema,
+  videoSaveSchema,
+  highlightSchema,
+  hideHighlightSchema,
   evaluateSchema,
   fillSchema,
   navigateSchema,
@@ -140,7 +150,13 @@ export async function handleTool(manager: BrowserManager, name: string, args: un
   switch (name) {
     case "browser_start": {
       const parsed = startSchema.parse(args ?? {});
-      const page = await manager.start(parsed);
+      // Normalize recordVideo: true -> {} (defaults), false -> undefined, object -> object.
+      const { recordVideo, ...rest } = parsed;
+      const normalized = {
+        ...rest,
+        ...(recordVideo === true ? { recordVideo: {} } : recordVideo && typeof recordVideo === "object" ? { recordVideo } : {}),
+      };
+      const page = await manager.start(normalized);
       return text({ ok: true, url: page.url(), status: await manager.status() });
     }
     case "browser_status": {
@@ -456,6 +472,169 @@ export async function handleTool(manager: BrowserManager, name: string, args: un
       }
       return text({ ok: true, cookies: state.cookies?.length ?? 0, origins: originsApplied });
     }
+    case "browser_cookie_list": {
+      const parsed = cookieListSchema.parse(args ?? {});
+      const page = await manager.getPage();
+      let cookies = await page.context().cookies();
+      if (parsed.domain) cookies = cookies.filter((c) => c.domain.includes(parsed.domain!));
+      if (parsed.path) cookies = cookies.filter((c) => c.path === parsed.path);
+      return text({ ok: true, count: cookies.length, cookies });
+    }
+    case "browser_cookie_get": {
+      const parsed = cookieGetSchema.parse(args);
+      const page = await manager.getPage();
+      const cookie = (await page.context().cookies()).find((c) => c.name === parsed.name) ?? null;
+      return text({ ok: true, cookie });
+    }
+    case "browser_cookie_set": {
+      const parsed = cookieSetSchema.parse(args);
+      const page = await manager.getPage();
+      const cookie: Record<string, unknown> = { name: parsed.name, value: parsed.value };
+      if (parsed.url) cookie.url = parsed.url;
+      if (parsed.domain) { cookie.domain = parsed.domain; cookie.path = parsed.path ?? "/"; }
+      // Fall back to the active page's origin when neither url nor domain is given.
+      if (!parsed.url && !parsed.domain) {
+        const current = page.url();
+        if (!current || current === "about:blank") {
+          return text({ ok: false, error: "Provide url or domain (no active origin to infer from)." });
+        }
+        cookie.url = current;
+      }
+      if (parsed.expires !== undefined) cookie.expires = parsed.expires;
+      if (parsed.httpOnly !== undefined) cookie.httpOnly = parsed.httpOnly;
+      if (parsed.secure !== undefined) cookie.secure = parsed.secure;
+      if (parsed.sameSite !== undefined) cookie.sameSite = parsed.sameSite;
+      await page.context().addCookies([cookie as any]);
+      return text({ ok: true });
+    }
+    case "browser_cookie_delete": {
+      const parsed = cookieDeleteSchema.parse(args);
+      const page = await manager.getPage();
+      await page.context().clearCookies({
+        name: parsed.name,
+        ...(parsed.domain ? { domain: parsed.domain } : {}),
+        ...(parsed.path ? { path: parsed.path } : {}),
+      });
+      return text({ ok: true });
+    }
+    case "browser_cookie_clear": {
+      const page = await manager.getPage();
+      await page.context().clearCookies();
+      return text({ ok: true });
+    }
+    case "browser_localstorage_list":
+    case "browser_sessionstorage_list": {
+      const store = name === "browser_localstorage_list" ? "localStorage" : "sessionStorage";
+      const page = await manager.getPage();
+      const items = await page.evaluate((s: string) => {
+        const target = (window as any)[s] as Storage;
+        const out: Record<string, string> = {};
+        for (let i = 0; i < target.length; i++) {
+          const k = target.key(i);
+          if (k !== null) out[k] = target.getItem(k) ?? "";
+        }
+        return out;
+      }, store);
+      return text({ ok: true, origin: new URL(page.url()).origin, count: Object.keys(items).length, items });
+    }
+    case "browser_localstorage_get":
+    case "browser_sessionstorage_get": {
+      const store = name === "browser_localstorage_get" ? "localStorage" : "sessionStorage";
+      const parsed = storageKeyGetSchema.parse(args);
+      const page = await manager.getPage();
+      const value = await page.evaluate(
+        (o: { s: string; key: string }) => ((window as any)[o.s] as Storage).getItem(o.key),
+        { s: store, key: parsed.key },
+      );
+      return text({ ok: true, key: parsed.key, value });
+    }
+    case "browser_localstorage_set":
+    case "browser_sessionstorage_set": {
+      const store = name === "browser_localstorage_set" ? "localStorage" : "sessionStorage";
+      const parsed = storageKeySetSchema.parse(args);
+      const page = await manager.getPage();
+      await page.evaluate(
+        (o: { s: string; key: string; value: string }) => ((window as any)[o.s] as Storage).setItem(o.key, o.value),
+        { s: store, key: parsed.key, value: parsed.value },
+      );
+      return text({ ok: true, key: parsed.key });
+    }
+    case "browser_localstorage_delete":
+    case "browser_sessionstorage_delete": {
+      const store = name === "browser_localstorage_delete" ? "localStorage" : "sessionStorage";
+      const parsed = storageKeyDeleteSchema.parse(args);
+      const page = await manager.getPage();
+      await page.evaluate(
+        (o: { s: string; key: string }) => ((window as any)[o.s] as Storage).removeItem(o.key),
+        { s: store, key: parsed.key },
+      );
+      return text({ ok: true, key: parsed.key });
+    }
+    case "browser_localstorage_clear":
+    case "browser_sessionstorage_clear": {
+      const store = name === "browser_localstorage_clear" ? "localStorage" : "sessionStorage";
+      const page = await manager.getPage();
+      await page.evaluate((s: string) => ((window as any)[s] as Storage).clear(), store);
+      return text({ ok: true });
+    }
+    case "browser_video_save": {
+      const parsed = videoSaveSchema.parse(args ?? {});
+      if (parsed.path) return text(await manager.saveVideoAs(parsed.path));
+      return text(await manager.videoInfo());
+    }
+    case "browser_highlight": {
+      const parsed = highlightSchema.parse(args);
+      const page = await manager.getPage();
+      const key = parsed.label ?? parsed.selector ?? parsed.ref ?? "highlight";
+      await locatorFor(page, parsed).evaluate(
+        (el: Element, opts: { key: string; label?: string; style?: string }) => {
+          let container = document.getElementById("__mcp_hl__");
+          if (!container) {
+            container = document.createElement("div");
+            container.id = "__mcp_hl__";
+            document.body.appendChild(container);
+          }
+          const r = el.getBoundingClientRect();
+          const item = document.createElement("div");
+          item.dataset.key = opts.key;
+          item.style.cssText =
+            `position:absolute;left:${r.left + window.scrollX}px;top:${r.top + window.scrollY}px;` +
+            `width:${r.width}px;height:${r.height}px;pointer-events:none;z-index:2147483647;` +
+            `outline:2px solid #ff3b30;box-shadow:0 0 0 2px rgba(255,59,48,.3);border-radius:2px;${opts.style ?? ""}`;
+          if (opts.label) {
+            const tag = document.createElement("div");
+            tag.textContent = opts.label;
+            tag.style.cssText =
+              "position:absolute;top:-20px;left:0;background:#ff3b30;color:#fff;" +
+              "font:11px/1.4 sans-serif;padding:1px 6px;border-radius:3px;white-space:nowrap;";
+            item.appendChild(tag);
+          }
+          container.appendChild(item);
+        },
+        { key, label: parsed.label, style: parsed.style },
+        { timeout: parsed.timeout ?? 30_000 } as any,
+      );
+      return text({ ok: true, key });
+    }
+    case "browser_hide_highlight": {
+      const parsed = hideHighlightSchema.parse(args ?? {});
+      const page = await manager.getPage();
+      const key = parsed.label ?? parsed.selector ?? parsed.ref ?? null;
+      const removed = await page.evaluate((k: string | null) => {
+        const container = document.getElementById("__mcp_hl__");
+        if (!container) return 0;
+        if (!k) {
+          const n = container.children.length;
+          container.remove();
+          return n;
+        }
+        let n = 0;
+        container.querySelectorAll(`[data-key="${CSS.escape(k)}"]`).forEach((el) => { el.remove(); n++; });
+        if (!container.children.length) container.remove();
+        return n;
+      }, key);
+      return text({ ok: true, removed });
+    }
     case "browser_save_pdf": {
       const parsed = savePdfSchema.parse(args ?? {});
       const page = await manager.getPage();
@@ -481,8 +660,8 @@ export async function handleTool(manager: BrowserManager, name: string, args: un
       }
     }
     case "browser_close": {
-      await manager.close();
-      return text({ ok: true });
+      const { videos } = await manager.close();
+      return text({ ok: true, ...(videos.length ? { videos } : {}) });
     }
     default:
       return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };

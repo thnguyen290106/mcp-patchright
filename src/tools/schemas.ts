@@ -23,6 +23,14 @@ export const startSchema = z.object({
   }).optional(),
   colorScheme: z.enum(["light", "dark", "no-preference"]).optional(),
   cdpEndpoint: z.string().url().optional(),
+  recordVideo: z.union([
+    z.boolean(),
+    z.object({
+      dir: z.string().optional(),
+      width: z.number().int().positive().optional(),
+      height: z.number().int().positive().optional(),
+    }),
+  ]).optional(),
 });
 
 export const navigateSchema = z.object({
@@ -221,4 +229,63 @@ export const savePdfSchema = z.object({
   printBackground: z.boolean().optional(),
   scale: z.number().positive().optional(),
   format: z.enum(["Letter", "Legal", "Tabloid", "A3", "A4", "A5"]).optional(),
+});
+
+// --- Storage: cookies ---
+export const cookieListSchema = z.object({
+  domain: z.string().optional(),
+  path: z.string().optional(),
+});
+
+export const cookieGetSchema = z.object({
+  name: z.string().min(1),
+});
+
+export const cookieSetSchema = z.object({
+  name: z.string().min(1),
+  value: z.string(),
+  url: z.string().url().optional(),
+  domain: z.string().optional(),
+  path: z.string().optional(),
+  expires: z.number().optional(),
+  httpOnly: z.boolean().optional(),
+  secure: z.boolean().optional(),
+  sameSite: z.enum(["Strict", "Lax", "None"]).optional(),
+});
+
+export const cookieDeleteSchema = z.object({
+  name: z.string().min(1),
+  domain: z.string().optional(),
+  path: z.string().optional(),
+});
+
+// --- Storage: localStorage / sessionStorage ---
+export const storageKeyGetSchema = z.object({
+  key: z.string().min(1),
+});
+
+export const storageKeySetSchema = z.object({
+  key: z.string().min(1),
+  value: z.string(),
+});
+
+export const storageKeyDeleteSchema = z.object({
+  key: z.string().min(1),
+});
+
+// --- Video recording ---
+export const videoSaveSchema = z.object({
+  path: z.string().optional(),
+});
+
+// --- Highlight overlay ---
+export const highlightSchema = targetSchema.extend({
+  label: z.string().optional(),
+  style: z.string().optional(),
+});
+
+export const hideHighlightSchema = z.object({
+  label: z.string().optional(),
+  selector: z.string().optional(),
+  ref: z.string().optional(),
 });
