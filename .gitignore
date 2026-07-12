@@ -5,3 +5,4 @@ dist/
 docs/gen-*.py
 docs/gen-*.sh
 .DS_Store
+tmp/

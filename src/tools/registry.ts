@@ -174,13 +174,15 @@ export const tools: Tool[] = [
   },
   {
     name: "browser_type",
-    description: "Type text sequentially into an element by CSS selector or aria ref, with optional per-key delay.",
+    description:
+      "Type text into an element (CSS selector or aria ref) with human-like input: real per-key events, real Shift keyDown/up for capitals & symbols, variable dwell and inter-key gaps. Verifies the result against the request for input/textarea and errors on mismatch.",
     inputSchema: {
       type: "object",
       properties: {
         ...targetProperties,
         text: { type: "string" },
-        delay: { type: "number" },
+        verify: { type: "boolean", description: "Verify typed value matches request (default true) for input/textarea." },
+        delay: { type: "number", description: "Deprecated/ignored; timing is randomized." },
       },
       required: ["text"],
     },

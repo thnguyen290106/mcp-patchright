@@ -296,9 +296,11 @@ export async function handleTool(manager: BrowserManager, name: string, args: un
     case "browser_type": {
       const parsed = typeSchema.parse(args);
       const page = await manager.getPage();
-      await locatorFor(page, parsed).focus({ timeout: parsed.timeout ?? 30_000 });
-      await humanType(page, parsed.text, { delay: parsed.delay });
-      return text({ ok: true });
+      const result = await humanType(page, locatorFor(page, parsed), parsed.text, {
+        verify: parsed.verify,
+        timeout: parsed.timeout ?? 30_000,
+      });
+      return text({ ok: true, verified: result.verified });
     }
     case "browser_hover": {
       const parsed = targetSchema.parse(args);
