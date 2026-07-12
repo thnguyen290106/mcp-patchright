@@ -157,7 +157,7 @@ export class BrowserManager {
     this.videoDir = startOptions.recordVideo ? (startOptions.recordVideo.dir ?? DEFAULT_VIDEO_DIR) : undefined;
     if (this.videoDir) await mkdir(this.videoDir, { recursive: true });
 
-    const device = startOptions.device && Object.prototype.hasOwnProperty.call(devices, startOptions.device)
+    const device = startOptions.device && Object.hasOwn(devices, startOptions.device)
       ? devices[startOptions.device]
       : undefined;
     if (startOptions.device && !device) {
