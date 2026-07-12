@@ -3,6 +3,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Dialog, Locator, Page } from "patchright";
 import type { BrowserManager } from "../browser/manager.js";
 import { redactDataUrls } from "../util/redact.js";
+import { humanClick, humanType } from "../util/human.js";
 import {
   closePageSchema,
   selectOptionSchema,
@@ -283,7 +284,7 @@ export async function handleTool(manager: BrowserManager, name: string, args: un
     case "browser_click": {
       const parsed = targetSchema.parse(args);
       const page = await manager.getPage();
-      await locatorFor(page, parsed).click({ timeout: parsed.timeout ?? 30_000 });
+      await humanClick(page, locatorFor(page, parsed), { timeout: parsed.timeout ?? 30_000 });
       return text({ ok: true });
     }
     case "browser_fill": {
@@ -295,10 +296,8 @@ export async function handleTool(manager: BrowserManager, name: string, args: un
     case "browser_type": {
       const parsed = typeSchema.parse(args);
       const page = await manager.getPage();
-      await locatorFor(page, parsed).pressSequentially(parsed.text, {
-        delay: parsed.delay ?? 50,
-        timeout: parsed.timeout ?? 30_000,
-      });
+      await locatorFor(page, parsed).focus({ timeout: parsed.timeout ?? 30_000 });
+      await humanType(page, parsed.text, { delay: parsed.delay });
       return text({ ok: true });
     }
     case "browser_hover": {
@@ -489,7 +488,7 @@ export async function handleTool(manager: BrowserManager, name: string, args: un
           const root = opts.selector ? document.querySelector(opts.selector) : document.documentElement;
           if (!root) return "";
           const clone = root.cloneNode(true) as Element;
-          if (opts.removeScripts) clone.querySelectorAll("script,style,noscript,template,svg").forEach((n) => n.remove());
+          if (opts.removeScripts) clone.querySelectorAll("script,style,noscript,template,svg").forEach((n) => { n.remove(); });
           return clone.outerHTML ?? "";
         },
         { selector: parsed.selector ?? null, removeScripts: parsed.removeScripts ?? true },
