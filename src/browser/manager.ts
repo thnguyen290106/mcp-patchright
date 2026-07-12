@@ -5,11 +5,13 @@ import {
   chromium,
   firefox,
   webkit,
+  devices,
   type Browser,
   type BrowserContext,
   type Page,
   type Route,
 } from "patchright";
+import { redactDataUrl, redactSecrets } from "../util/redact.js";
 
 export type BrowserName = "chromium" | "firefox" | "webkit";
 export type BrowserEngine = "patchright" | "cdp";
@@ -27,6 +29,8 @@ export interface StartOptions {
   proxy?: { server: string; username?: string; password?: string; bypass?: string };
   geolocation?: { latitude: number; longitude: number; accuracy?: number };
   colorScheme?: "light" | "dark" | "no-preference";
+  device?: string;
+  mobile?: boolean;
   cdpEndpoint?: string;
   recordVideo?: { dir?: string; width?: number; height?: number };
 }
@@ -153,12 +157,25 @@ export class BrowserManager {
     this.videoDir = startOptions.recordVideo ? (startOptions.recordVideo.dir ?? DEFAULT_VIDEO_DIR) : undefined;
     if (this.videoDir) await mkdir(this.videoDir, { recursive: true });
 
+    const device = startOptions.device && Object.prototype.hasOwnProperty.call(devices, startOptions.device)
+      ? devices[startOptions.device]
+      : undefined;
+    if (startOptions.device && !device) {
+      throw new Error(`Unknown device: ${startOptions.device}. See Playwright device registry for valid names.`);
+    }
+    const mobile = startOptions.mobile ?? device?.isMobile;
+
     const launcher = browserName === "firefox" ? firefox : browserName === "webkit" ? webkit : chromium;
     this.context = await launcher.launchPersistentContext(userDataDir, {
       ...(browserName === "chromium" ? { channel: startOptions.channel ?? "chrome" } : {}),
       headless,
-      viewport: headless ? { width, height } : null,
-      ...(startOptions.userAgent ? { userAgent: startOptions.userAgent } : {}),
+      // Device / mobile emulation needs a fixed viewport; otherwise keep the
+      // headed window's own viewport (null) or an explicit headless size.
+      viewport: device?.viewport ?? (mobile ? { width, height } : headless ? { width, height } : null),
+      ...(device?.deviceScaleFactor ? { deviceScaleFactor: device.deviceScaleFactor } : {}),
+      ...(mobile !== undefined ? { isMobile: mobile, hasTouch: device?.hasTouch ?? mobile } : {}),
+      // Explicit userAgent wins over the device default.
+      ...(startOptions.userAgent ? { userAgent: startOptions.userAgent } : device?.userAgent ? { userAgent: device.userAgent } : {}),
       ...(startOptions.locale ? { locale: startOptions.locale } : {}),
       ...(startOptions.timezoneId ? { timezoneId: startOptions.timezoneId } : {}),
       ...(startOptions.proxy ? { proxy: startOptions.proxy } : {}),
@@ -272,7 +289,7 @@ export class BrowserManager {
     page.on("request", (req) => {
       this._networkRequests.push({
         id: String(this._networkRequests.length + 1),
-        url: req.url(),
+        url: redactDataUrl(req.url()),
         method: req.method(),
         type: req.resourceType(),
         timestamp: Date.now(),
@@ -282,7 +299,8 @@ export class BrowserManager {
     });
     page.on("response", (res) => {
       const req = res.request();
-      const existing = this._networkRequests.find((e) => e.url === req.url() && e.method === req.method() && !e.status);
+      const reqUrl = redactDataUrl(req.url());
+      const existing = this._networkRequests.find((e) => e.url === reqUrl && e.method === req.method() && !e.status);
       if (existing) {
         existing.status = res.status();
         existing.statusText = res.statusText();
@@ -292,7 +310,7 @@ export class BrowserManager {
     page.on("console", (msg) => {
       this._consoleMessages.push({
         type: msg.type(),
-        text: msg.text(),
+        text: redactSecrets(msg.text()),
         timestamp: Date.now(),
         location: msg.location(),
       });

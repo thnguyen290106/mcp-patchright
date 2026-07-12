@@ -17,6 +17,9 @@ type CliOptions = {
   port?: number;
   userDataDir?: string;
   headless?: boolean;
+  outputMaxSize?: number;
+  device?: string;
+  mobile?: boolean;
 };
 
 type ManagedServer = Server & { __manager: BrowserManager; __ownsManager: boolean };
@@ -50,6 +53,18 @@ function parseCli(argv = process.argv.slice(2)): CliOptions {
       case "--headed":
         options.headless = false;
         break;
+      case "--output-max-size": {
+        const value = Number(nextValue());
+        if (!Number.isInteger(value) || value <= 0) throw new Error(`Invalid --output-max-size: ${String(value)}`);
+        options.outputMaxSize = value;
+        break;
+      }
+      case "--device":
+        options.device = nextValue();
+        break;
+      case "--mobile":
+        options.mobile = true;
+        break;
       case "--help":
       case "-h":
         printHelp();
@@ -63,10 +78,32 @@ function parseCli(argv = process.argv.slice(2)): CliOptions {
 }
 
 function printHelp(): void {
-  console.log(`mcp-patchright\n\nUsage:\n  mcp-patchright                         # stdio MCP transport\n  mcp-patchright --port 9100 [options]   # HTTP MCP transport\n\nOptions:\n  --host <host>              HTTP bind host (default: 127.0.0.1)\n  --port <port>              Enable HTTP mode on this port\n  --user-data-dir <path>     Default persistent browser profile directory\n  --headless                 Start browser headless by default\n  --headed                   Start browser headed by default\n`);
+  console.log(`mcp-patchright\n\nUsage:\n  mcp-patchright                         # stdio MCP transport\n  mcp-patchright --port 9100 [options]   # HTTP MCP transport\n\nOptions:\n  --host <host>              HTTP bind host (default: 127.0.0.1)\n  --port <port>              Enable HTTP mode on this port\n  --user-data-dir <path>     Default persistent browser profile directory\n  --headless                 Start browser headless by default\n  --headed                   Start browser headed by default\n  --device <name>            Emulate a device from the Playwright registry (e.g. "iPhone 15")\n  --mobile                   Enable mobile emulation (touch + mobile UA hints)\n  --output-max-size <bytes>  Cap each tool response text to this many chars\n`);
 }
 
-function createServer(defaultStartOptions: StartOptions = {}, sharedManager?: BrowserManager): ManagedServer {
+// Cap the total text size of a tool result. Oversized text is truncated with a
+// marker so a single huge response can't blow up the client context.
+function capResult(result: Awaited<ReturnType<typeof handleTool>>, maxSize?: number): typeof result {
+  if (!maxSize || !result?.content) return result;
+  for (const part of result.content) {
+    if (part.type === "text" && typeof part.text === "string" && part.text.length > maxSize) {
+      const omitted = part.text.length - maxSize;
+      part.text = `${part.text.slice(0, maxSize)}\n\n[output truncated: ${omitted} chars omitted, over --output-max-size=${maxSize}]`;
+    } else if (part.type === "image" && typeof part.data === "string" && part.data.length > maxSize) {
+      // Drop oversized image payloads rather than truncate (a sliced base64 is
+      // an unusable/corrupt image); replace with a text notice.
+      const size = part.data.length;
+      const notice = part as unknown as { type: string; text?: string; data?: unknown; mimeType?: unknown };
+      notice.type = "text";
+      notice.text = `[image omitted: ${size} chars base64 exceeds --output-max-size=${maxSize}]`;
+      delete notice.data;
+      delete notice.mimeType;
+    }
+  }
+  return result;
+}
+
+function createServer(defaultStartOptions: StartOptions = {}, sharedManager?: BrowserManager, outputMaxSize?: number): ManagedServer {
   const server = new Server(
     {
       name: "mcp-patchright",
@@ -87,7 +124,7 @@ function createServer(defaultStartOptions: StartOptions = {}, sharedManager?: Br
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
-      return await handleTool(manager, request.params.name, request.params.arguments ?? {});
+      return capResult(await handleTool(manager, request.params.name, request.params.arguments ?? {}), outputMaxSize);
     } catch (error) {
       return {
         content: [
@@ -109,8 +146,8 @@ async function closeManagedServer(server: ManagedServer): Promise<void> {
   await server.close().catch(() => undefined);
 }
 
-async function startStdio(defaultStartOptions: StartOptions): Promise<void> {
-  const server = createServer(defaultStartOptions);
+async function startStdio(defaultStartOptions: StartOptions, outputMaxSize?: number): Promise<void> {
+  const server = createServer(defaultStartOptions, undefined, outputMaxSize);
 
   process.on("SIGINT", () => {
     void closeManagedServer(server).finally(() => process.exit(0));
@@ -122,7 +159,7 @@ async function startStdio(defaultStartOptions: StartOptions): Promise<void> {
   await server.connect(new StdioServerTransport());
 }
 
-async function startHttp(options: CliOptions & { port: number }, defaultStartOptions: StartOptions): Promise<void> {
+async function startHttp(options: CliOptions & { port: number }, defaultStartOptions: StartOptions, outputMaxSize?: number): Promise<void> {
   const app = createMcpExpressApp();
   const sharedManager = new BrowserManager(defaultStartOptions);
   const transports: Record<string, ManagedTransport> = {};
@@ -156,7 +193,7 @@ async function startHttp(options: CliOptions & { port: number }, defaultStartOpt
           },
         });
 
-        server = createServer(defaultStartOptions, sharedManager);
+        server = createServer(defaultStartOptions, sharedManager, outputMaxSize);
         transport.onclose = () => {
           const sid = transport?.sessionId;
           if (sid) {
@@ -183,7 +220,7 @@ async function startHttp(options: CliOptions & { port: number }, defaultStartOpt
 
   app.get("/sse", async (_req: Request, res: Response) => {
     const transport = new SSEServerTransport("/messages", res);
-    const server = createServer(defaultStartOptions, sharedManager);
+    const server = createServer(defaultStartOptions, sharedManager, outputMaxSize);
     transports[transport.sessionId] = transport;
     servers[transport.sessionId] = server;
 
@@ -243,10 +280,12 @@ const cliOptions = parseCli();
 const defaultStartOptions: StartOptions = {
   ...(cliOptions.userDataDir ? { userDataDir: cliOptions.userDataDir } : {}),
   ...(cliOptions.headless !== undefined ? { headless: cliOptions.headless } : {}),
+  ...(cliOptions.device ? { device: cliOptions.device } : {}),
+  ...(cliOptions.mobile ? { mobile: cliOptions.mobile } : {}),
 };
 
 if (cliOptions.port !== undefined) {
-  await startHttp({ ...cliOptions, port: cliOptions.port }, defaultStartOptions);
+  await startHttp({ ...cliOptions, port: cliOptions.port }, defaultStartOptions, cliOptions.outputMaxSize);
 } else {
-  await startStdio(defaultStartOptions);
+  await startStdio(defaultStartOptions, cliOptions.outputMaxSize);
 }

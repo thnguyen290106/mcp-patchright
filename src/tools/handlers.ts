@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { Dialog, Locator, Page } from "patchright";
 import type { BrowserManager } from "../browser/manager.js";
+import { redactDataUrls } from "../util/redact.js";
 import {
   closePageSchema,
   selectOptionSchema,
@@ -35,6 +36,8 @@ import {
   highlightSchema,
   hideHighlightSchema,
   evaluateSchema,
+  snapshotSchema,
+  findSchema,
   fillSchema,
   navigateSchema,
   newPageSchema,
@@ -81,6 +84,27 @@ const PDF_PAPER: Record<string, { width: number; height: number }> = {
   A4: { width: 8.27, height: 11.69 },
   A5: { width: 5.83, height: 8.27 },
 };
+
+// Distill an aria snapshot to cut token usage: drop verbose /url lines by
+// default, redact data: URLs, and collapse redundant blank lines. Refs are
+// preserved so downstream tools keep working.
+function distillSnapshot(snapshot: string, opts: { includeUrls?: boolean } = {}): string {
+  const lines = snapshot.split("\n");
+  const out: string[] = [];
+  let blank = false;
+  for (const raw of lines) {
+    if (!opts.includeUrls && /^\s*- \/url:/.test(raw)) continue;
+    const line = redactDataUrls(raw);
+    if (line.trim() === "") {
+      if (blank) continue;
+      blank = true;
+    } else {
+      blank = false;
+    }
+    out.push(line);
+  }
+  return out.join("\n").trim();
+}
 
 function locatorFor(page: Page, target: { selector?: string; ref?: string; frameSelector?: string }): Locator {
   const root = target.frameSelector ? page.frameLocator(target.frameSelector) : page;
@@ -169,11 +193,15 @@ export async function handleTool(manager: BrowserManager, name: string, args: un
         waitUntil: parsed.waitUntil ?? "domcontentloaded",
         timeout: parsed.timeout ?? 30_000,
       });
+      const status = response?.status();
+      const failed = status !== undefined && status >= 400;
       return text({
-        ok: true,
+        ok: !failed,
         url: page.url(),
         title: await page.title().catch(() => undefined),
-        status: response?.status(),
+        status,
+        statusText: response?.statusText(),
+        ...(failed ? { warning: `Navigation returned HTTP ${status}` } : {}),
       });
     }
     case "browser_new_page": {
@@ -192,14 +220,63 @@ export async function handleTool(manager: BrowserManager, name: string, args: un
       return text(await manager.closePage(parsed.pageId));
     }
     case "browser_snapshot": {
+      const parsed = snapshotSchema.parse(args ?? {});
       const page = await manager.getPage();
-      const snapshot = await page.ariaSnapshot({ mode: "ai", timeout: 5_000 });
-      return text({ url: page.url(), title: await page.title().catch(() => undefined), snapshot });
+      const raw = await page.ariaSnapshot({ mode: "ai", timeout: 5_000 });
+      const distilled = distillSnapshot(raw, { includeUrls: parsed.includeUrls });
+      const out = truncate(distilled, parsed.maxLength);
+      return text({
+        url: page.url(),
+        title: await page.title().catch(() => undefined),
+        snapshot: out.text,
+        truncated: out.truncated,
+        length: out.length,
+      });
+    }
+    case "browser_find": {
+      const parsed = findSchema.parse(args);
+      const page = await manager.getPage();
+      const raw = await page.ariaSnapshot({ mode: "ai", timeout: 5_000 });
+      const lines = distillSnapshot(raw).split("\n");
+      const ctx = parsed.context ?? 2;
+      const maxMatches = parsed.maxMatches ?? 20;
+      const flags = parsed.ignoreCase === false ? "" : "i";
+      let matcher: (line: string) => boolean;
+      if (parsed.regex) {
+        let re: RegExp;
+        try {
+          re = new RegExp(parsed.query, flags);
+        } catch (e) {
+          return text({ ok: false, error: `Invalid regex: ${e instanceof Error ? e.message : String(e)}` });
+        }
+        matcher = (line) => re.test(line);
+      } else {
+        const needle = flags ? parsed.query.toLowerCase() : parsed.query;
+        matcher = (line) => (flags ? line.toLowerCase() : line).includes(needle);
+      }
+      const refRe = /\[ref=([a-zA-Z0-9]+)\]/;
+      const matches: { line: number; text: string; ref?: string; context: string[] }[] = [];
+      for (let i = 0; i < lines.length && matches.length < maxMatches; i++) {
+        if (!matcher(lines[i])) continue;
+        const start = Math.max(0, i - ctx);
+        const end = Math.min(lines.length, i + ctx + 1);
+        matches.push({
+          line: i + 1,
+          text: lines[i].trim(),
+          ref: lines[i].match(refRe)?.[1],
+          context: lines.slice(start, end),
+        });
+      }
+      return text({ url: page.url(), query: parsed.query, total: matches.length, matches });
     }
     case "browser_take_screenshot": {
       const parsed = screenshotSchema.parse(args ?? {});
       const page = await manager.getPage();
-      const shot = await page.screenshot({ path: parsed.path, fullPage: parsed.fullPage ?? true });
+      const shot = await page.screenshot({
+        path: parsed.path,
+        fullPage: parsed.fullPage ?? true,
+        ...(parsed.scale ? { scale: parsed.scale } : {}),
+      });
       if (parsed.path) return text({ ok: true, path: parsed.path });
       return image(shot);
     }

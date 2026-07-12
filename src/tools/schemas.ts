@@ -22,6 +22,8 @@ export const startSchema = z.object({
     accuracy: z.number().optional(),
   }).optional(),
   colorScheme: z.enum(["light", "dark", "no-preference"]).optional(),
+  device: z.string().optional(),
+  mobile: z.boolean().optional(),
   cdpEndpoint: z.string().url().optional(),
   recordVideo: z.union([
     z.boolean(),
@@ -54,6 +56,20 @@ export const closePageSchema = z.object({
 export const screenshotSchema = z.object({
   path: z.string().optional(),
   fullPage: z.boolean().optional(),
+  scale: z.enum(["css", "device"]).optional(),
+});
+
+export const snapshotSchema = z.object({
+  maxLength: z.number().int().positive().optional(),
+  includeUrls: z.boolean().optional(),
+});
+
+export const findSchema = z.object({
+  query: z.string().min(1),
+  regex: z.boolean().optional(),
+  ignoreCase: z.boolean().optional(),
+  context: z.number().int().nonnegative().optional(),
+  maxMatches: z.number().int().positive().optional(),
 });
 
 export const targetSchema = z
