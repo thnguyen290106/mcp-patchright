@@ -45,6 +45,8 @@ export const tools: Tool[] = [
           required: ["latitude", "longitude"],
         },
         colorScheme: { type: "string", enum: ["light", "dark", "no-preference"] },
+        device: { type: "string", description: "Emulate a device from the Playwright registry, e.g. \"iPhone 15\", \"Pixel 7\". Sets viewport, UA, scale factor, and touch." },
+        mobile: { type: "boolean", description: "Enable mobile emulation (touch + mobile hints) without a full device descriptor." },
         cdpEndpoint: { type: "string", description: "Existing Chrome remote debugging endpoint, e.g. http://127.0.0.1:9222" },
         recordVideo: {
           description: "Record a video of the whole session. Pass true for defaults, or an object to customize. Saved as .webm; files finalize on browser_close. Not available over cdpEndpoint.",
@@ -114,8 +116,29 @@ export const tools: Tool[] = [
   },
   {
     name: "browser_snapshot",
-    description: "Return an AI-oriented aria snapshot. Use [ref=eN] values with browser_click/fill/type/hover/press/wait_for.",
-    inputSchema: { type: "object", properties: {} },
+    description: "Return a distilled AI-oriented aria snapshot (verbose /url lines dropped and data: URLs collapsed to save tokens). Use [ref=eN] values with browser_click/fill/type/hover/press/wait_for.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        maxLength: { type: "number", description: "Truncate snapshot to this many chars." },
+        includeUrls: { type: "boolean", description: "Keep /url lines for links. Default false for token efficiency." },
+      },
+    },
+  },
+  {
+    name: "browser_find",
+    description: "Search the current page's aria snapshot for text or a regex. Returns matching nodes with their [ref] and a few lines of surrounding context — cheaper than a full browser_snapshot when you only need to locate an element.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Text substring, or a regex source when regex=true." },
+        regex: { type: "boolean", description: "Treat query as a regular expression." },
+        ignoreCase: { type: "boolean", description: "Case-insensitive match. Default true." },
+        context: { type: "number", description: "Lines of surrounding context per match. Default 2." },
+        maxMatches: { type: "number", description: "Max matches to return. Default 20." },
+      },
+      required: ["query"],
+    },
   },
   {
     name: "browser_take_screenshot",
@@ -125,6 +148,7 @@ export const tools: Tool[] = [
       properties: {
         path: { type: "string" },
         fullPage: { type: "boolean" },
+        scale: { type: "string", enum: ["css", "device"], description: "css = smaller, device-consistent CSS pixels; device = full device-pixel resolution." },
       },
     },
   },
