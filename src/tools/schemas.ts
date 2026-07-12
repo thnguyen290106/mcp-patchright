@@ -89,7 +89,12 @@ export const fillSchema = targetSchema.extend({
 
 export const typeSchema = targetSchema.extend({
   text: z.string(),
+  // Deprecated: per-key dwell and inter-key gaps are now randomized for
+  // human-like timing. Kept for backward compatibility; ignored.
   delay: z.number().int().nonnegative().optional(),
+  // When true (default), verify the typed value against the request for
+  // input/textarea elements and throw on mismatch.
+  verify: z.boolean().optional(),
 });
 
 export const pressSchema = z.object({
