@@ -23,30 +23,8 @@ function randInt(min: number, max: number): number {
   return Math.floor(rand(min, max + 1));
 }
 
-function clamp(v: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, v));
-}
-
 function sleep(page: Page, ms: number): Promise<void> {
   return ms > 0 ? page.waitForTimeout(ms) : Promise.resolve();
-}
-
-// ---------------------------------------------------------------------------
-// Per-page pointer state: each click should start from where the cursor last
-// ended, otherwise every move teleports in from a random point.
-// ---------------------------------------------------------------------------
-interface HumanState {
-  pointer?: { x: number; y: number };
-}
-const states = new WeakMap<Page, HumanState>();
-
-function getState(page: Page): HumanState {
-  let s = states.get(page);
-  if (!s) {
-    s = {};
-    states.set(page, s);
-  }
-  return s;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,13 +50,10 @@ function dwell(): number {
   return randInt(25, 100);
 }
 
-// Inter-key gap distribution: mostly moderate, occasional very fast bursts and
-// long pauses. High variance is what separates a human from a fixed delay.
+// Simple randomized gap between keys — enough to avoid a fixed cadence without
+// the elaborate long-pause distribution.
 function interKeyGap(): number {
-  const r = Math.random();
-  if (r < 0.15) return randInt(20, 55); // quick burst
-  if (r < 0.5) return randInt(180, 450); // deliberate pause
-  return randInt(60, 170); // normal
+  return randInt(40, 140);
 }
 
 async function typeChar(page: Page, ch: string): Promise<void> {
@@ -160,87 +135,21 @@ export async function humanType(
 // Mouse
 // ---------------------------------------------------------------------------
 
-function easeInOut(t: number): number {
-  return t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
-}
-
-function cubicBezier(
-  p0: { x: number; y: number },
-  p1: { x: number; y: number },
-  p2: { x: number; y: number },
-  p3: { x: number; y: number },
-  t: number,
-): { x: number; y: number } {
-  const u = 1 - t;
-  const a = u * u * u;
-  const b = 3 * u * u * t;
-  const c = 3 * u * t * t;
-  const d = t * t * t;
-  return {
-    x: a * p0.x + b * p1.x + c * p2.x + d * p3.x,
-    y: a * p0.y + b * p1.y + c * p2.y + d * p3.y,
-  };
-}
-
-// Move the pointer to (tx, ty) along a dense cubic-bezier arc with float
-// coordinates and micro-jitter. Starts from the page's last known pointer
-// position so movement is continuous rather than teleporting.
-export async function humanMoveTo(page: Page, tx: number, ty: number): Promise<void> {
-  const state = getState(page);
-  const start = state.pointer ?? { x: tx + rand(-60, 60), y: ty + rand(-60, 60) };
-
-  const dx = tx - start.x;
-  const dy = ty - start.y;
-  const distance = Math.hypot(dx, dy);
-
-  // Bow the path perpendicular to the travel direction for a natural arc.
-  const nlen = distance || 1;
-  const nx = -dy / nlen;
-  const ny = dx / nlen;
-  const bow = clamp(distance * 0.15, 4, 60) * (Math.random() < 0.5 ? -1 : 1);
-  const cp1 = {
-    x: start.x + dx * 0.3 + nx * bow * rand(0.4, 1),
-    y: start.y + dy * 0.3 + ny * bow * rand(0.4, 1),
-  };
-  const cp2 = {
-    x: start.x + dx * 0.7 + nx * bow * rand(0.4, 1),
-    y: start.y + dy * 0.7 + ny * bow * rand(0.4, 1),
-  };
-
-  const steps = clamp(Math.ceil(distance / 3.5), 16, 120);
-  let prevX = start.x;
-  let prevY = start.y;
-  for (let i = 1; i <= steps; i++) {
-    const t = easeInOut(i / steps);
-    const p = cubicBezier(start, cp1, cp2, { x: tx, y: ty }, t);
-    const px = p.x + rand(-0.7, 0.7);
-    const py = p.y + rand(-0.7, 0.7);
-    if (Math.hypot(px - prevX, py - prevY) < 0.2) continue; // drop duplicates
-    await page.mouse.move(px, py);
-    prevX = px;
-    prevY = py;
-    await sleep(page, randInt(4, 14));
-  }
-  // Settle exactly on the (float) target and remember it.
-  await page.mouse.move(tx, ty);
-  state.pointer = { x: tx, y: ty };
-}
-
-// Click an off-center point inside the element's bounding box using a human
-// mouse path and a real press-hold. Never uses the geometric center, never
-// falls back to a plain locator.click() when a box is available.
+// Click an off-center point inside the element's bounding box with a real
+// press-hold. Uses a randomized sub-pixel point (never the geometric center)
+// and mouse.down/up with a short hold instead of locator.click(). No synthetic
+// multi-step path is generated. Falls back to locator.click() when no box is
+// available.
 export async function humanClick(page: Page, locator: Locator, opts: { timeout?: number } = {}): Promise<void> {
   await locator.scrollIntoViewIfNeeded({ timeout: opts.timeout }).catch(() => undefined);
   const box = await locator.boundingBox({ timeout: opts.timeout }).catch(() => null);
   if (!box || box.width <= 0 || box.height <= 0) {
     await locator.click({ timeout: opts.timeout });
-    const b = await locator.boundingBox().catch(() => null);
-    if (b) getState(page).pointer = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
     return;
   }
   const x = box.x + box.width * rand(0.35, 0.65);
   const y = box.y + box.height * rand(0.35, 0.65);
-  await humanMoveTo(page, x, y);
+  await page.mouse.move(x, y);
   await sleep(page, randInt(25, 70));
   await page.mouse.down();
   await sleep(page, randInt(40, 110));
