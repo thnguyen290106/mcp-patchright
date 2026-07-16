@@ -51,6 +51,7 @@
     "lint": "biome lint src",
     "lint:fix": "biome lint --write src",
     "test:humanize": "node test/humanize.test.mjs",
+    "test:owners": "npm run build && node test/owner-scope.test.mjs",
     "prepublishOnly": "npm run build"
   }
 }
