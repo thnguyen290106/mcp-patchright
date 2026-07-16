@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 import type { Server as HttpServer } from "node:http";
-import type { Request, Response } from "express";
-import { Server } from "@modelcontextprotocol/sdk/server/index.js";
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
-import { isInitializeRequest, CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { CallToolRequestSchema, isInitializeRequest, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import type { Request, Response } from "express";
 import { BrowserManager, type StartOptions } from "./browser/manager.js";
 import { handleTool } from "./tools/handlers.js";
 import { tools } from "./tools/registry.js";
@@ -25,6 +25,15 @@ type CliOptions = {
 type ManagedServer = Server & { __manager: BrowserManager; __ownsManager: boolean };
 
 type ManagedTransport = SSEServerTransport | StreamableHTTPServerTransport;
+
+function requestOwner(req: Request): string | undefined {
+  const header = req.header("x-browser-owner");
+  const query = typeof req.query.owner === "string" ? req.query.owner : undefined;
+  const owner = header || query;
+  if (!owner) return undefined;
+  if (owner.length > 256) throw new Error("Invalid browser owner: too long");
+  return owner;
+}
 
 function parseCli(argv = process.argv.slice(2)): CliOptions {
   const options: CliOptions = { host: "127.0.0.1" };
@@ -103,7 +112,12 @@ function capResult(result: Awaited<ReturnType<typeof handleTool>>, maxSize?: num
   return result;
 }
 
-function createServer(defaultStartOptions: StartOptions = {}, sharedManager?: BrowserManager, outputMaxSize?: number): ManagedServer {
+function createServer(
+  defaultStartOptions: StartOptions = {},
+  sharedManager?: BrowserManager,
+  outputMaxSize?: number,
+  owner?: string,
+): ManagedServer {
   const server = new Server(
     {
       name: "mcp-patchright",
@@ -124,7 +138,12 @@ function createServer(defaultStartOptions: StartOptions = {}, sharedManager?: Br
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
-      return capResult(await handleTool(manager, request.params.name, request.params.arguments ?? {}), outputMaxSize);
+      return capResult(
+        await manager.runAsOwner(owner, () =>
+          handleTool(manager, request.params.name, request.params.arguments ?? {}),
+        ),
+        outputMaxSize,
+      );
     } catch (error) {
       return {
         content: [
@@ -169,6 +188,20 @@ async function startHttp(options: CliOptions & { port: number }, defaultStartOpt
     res.json({ ok: true, name: "mcp-patchright", transports: Object.keys(transports).length, browser: await sharedManager.status().catch(() => undefined) });
   });
 
+  app.delete("/owners", async (req: Request, res: Response) => {
+    try {
+      const owner = requestOwner(req);
+      if (!owner) {
+        res.status(400).json({ ok: false, error: "owner is required" });
+        return;
+      }
+      const closed = await sharedManager.closeOwnerPages(owner);
+      res.json({ ok: true, owner, closed });
+    } catch (error) {
+      res.status(400).json({ ok: false, error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+
   app.all("/mcp", async (req: Request, res: Response) => {
     try {
       const sessionId = req.headers["mcp-session-id"];
@@ -193,7 +226,7 @@ async function startHttp(options: CliOptions & { port: number }, defaultStartOpt
           },
         });
 
-        server = createServer(defaultStartOptions, sharedManager, outputMaxSize);
+        server = createServer(defaultStartOptions, sharedManager, outputMaxSize, requestOwner(req));
         transport.onclose = () => {
           const sid = transport?.sessionId;
           if (sid) {
@@ -220,7 +253,7 @@ async function startHttp(options: CliOptions & { port: number }, defaultStartOpt
 
   app.get("/sse", async (_req: Request, res: Response) => {
     const transport = new SSEServerTransport("/messages", res);
-    const server = createServer(defaultStartOptions, sharedManager, outputMaxSize);
+    const server = createServer(defaultStartOptions, sharedManager, outputMaxSize, requestOwner(_req));
     transports[transport.sessionId] = transport;
     servers[transport.sessionId] = server;
 
