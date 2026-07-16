@@ -127,7 +127,7 @@ Full comparison HTML in [/docs/tool-comparison.html](docs/tool-comparison.html).
 
 ### Owner-scoped HTTP sessions
 
-When running HTTP mode with a shared persistent profile, pass a stable owner on
+HTTP mode requires a stable owner on
 the MCP URL (`?owner=<id>`) or with the `X-Browser-Owner` header. Page listing,
 switching, navigation, and closing are restricted to that owner's tabs. Delete
 `/owners?owner=<id>` to close all tabs owned by one caller without stopping the

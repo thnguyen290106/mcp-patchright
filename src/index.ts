@@ -35,6 +35,12 @@ function requestOwner(req: Request): string | undefined {
   return owner;
 }
 
+function requiredRequestOwner(req: Request): string {
+  const owner = requestOwner(req);
+  if (!owner) throw new Error("browser owner is required in HTTP mode");
+  return owner;
+}
+
 function parseCli(argv = process.argv.slice(2)): CliOptions {
   const options: CliOptions = { host: "127.0.0.1" };
 
@@ -226,7 +232,12 @@ async function startHttp(options: CliOptions & { port: number }, defaultStartOpt
           },
         });
 
-        server = createServer(defaultStartOptions, sharedManager, outputMaxSize, requestOwner(req));
+        const owner = requestOwner(req);
+        if (!owner) {
+          res.status(400).json({ jsonrpc: "2.0", error: { code: -32600, message: "browser owner is required in HTTP mode" }, id: null });
+          return;
+        }
+        server = createServer(defaultStartOptions, sharedManager, outputMaxSize, owner);
         transport.onclose = () => {
           const sid = transport?.sessionId;
           if (sid) {
@@ -251,9 +262,16 @@ async function startHttp(options: CliOptions & { port: number }, defaultStartOpt
     }
   });
 
-  app.get("/sse", async (_req: Request, res: Response) => {
+  app.get("/sse", async (req: Request, res: Response) => {
+    let owner: string;
+    try {
+      owner = requiredRequestOwner(req);
+    } catch (error) {
+      res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+      return;
+    }
     const transport = new SSEServerTransport("/messages", res);
-    const server = createServer(defaultStartOptions, sharedManager, outputMaxSize, requestOwner(_req));
+    const server = createServer(defaultStartOptions, sharedManager, outputMaxSize, owner);
     transports[transport.sessionId] = transport;
     servers[transport.sessionId] = server;
 

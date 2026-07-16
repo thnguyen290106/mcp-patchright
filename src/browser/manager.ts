@@ -65,6 +65,9 @@ export interface NetworkRequest {
   headers: Record<string, string>;
 }
 
+type OwnedNetworkRequest = NetworkRequest & { owner?: string };
+type OwnedConsoleMessage = ConsoleMessage & { owner?: string };
+
 export interface ConsoleMessage {
   type: string;
   text: string;
@@ -102,13 +105,16 @@ export class BrowserManager {
   private pageIds = new WeakMap<Page, string>();
   private trackedPages = new WeakSet<Page>();
   private nextPageId = 1;
+  private nextRouteId = 1;
+  private nextNetworkRequestId = 1;
+  private pageRegistrations = new Set<Promise<void>>();
   private engine: BrowserEngine = "patchright";
   private options?: Required<Pick<StartOptions, "browser" | "headless" | "userDataDir">> & StartOptions;
   private startPromise?: Promise<Page>;
   private videoDir?: string;
-  private _networkRequests: NetworkRequest[] = [];
-  private _consoleMessages: ConsoleMessage[] = [];
-  private _routeRules: (RouteRule & { handler: (route: Route) => unknown })[] = [];
+  private _networkRequests: OwnedNetworkRequest[] = [];
+  private _consoleMessages: OwnedConsoleMessage[] = [];
+  private _routeRules: (RouteRule & { owner?: string; handler: (route: Route) => unknown })[] = [];
 
   runAsOwner<T>(owner: string | undefined, fn: () => Promise<T>): Promise<T> {
     return ownerStorage.run(owner, fn);
@@ -140,6 +146,38 @@ export class BrowserManager {
     return this.context?.pages().find(
       (page) => !page.isClosed() && !this.pageOwners.has(page),
     );
+  }
+
+  private ownerForRoute(route: Route): string | undefined {
+    try {
+      return this.pageOwners.get(route.request().frame().page());
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async registerPage(page: Page): Promise<void> {
+    this.idFor(page);
+    const opener = await page.opener().catch(() => null);
+    const owner = opener ? this.pageOwners.get(opener) : undefined;
+    if (owner) {
+      this.pageOwners.set(page, owner);
+      this.activePages.set(owner, page);
+    }
+    this.trackPage(page);
+    this.activePage = page;
+  }
+
+  private queuePageRegistration(page: Page): void {
+    const registration = this.registerPage(page);
+    this.pageRegistrations.add(registration);
+    void registration.finally(() => this.pageRegistrations.delete(registration));
+  }
+
+  private async waitForPageRegistrations(): Promise<void> {
+    if (this.pageRegistrations.size) {
+      await Promise.allSettled([...this.pageRegistrations]);
+    }
   }
 
   async start(options: StartOptions = {}): Promise<Page> {
@@ -184,11 +222,7 @@ export class BrowserManager {
       this.videoDir = undefined; // recordVideo is unavailable over a CDP attach
       this.options = { ...startOptions, browser: browserName, headless, userDataDir };
       this.registerExistingPages();
-      this.context.on("page", (page) => {
-      this.idFor(page);
-      this.trackPage(page);
-      this.activePage = page;
-    });
+      this.context.on("page", (page) => this.queuePageRegistration(page));
     this.activePage = this.context.pages().find((page) => !page.isClosed()) ?? (await this.context.newPage());
     this.idFor(this.activePage);
     return this.activePage;
@@ -229,20 +263,22 @@ export class BrowserManager {
     this.engine = "patchright";
     this.options = { ...startOptions, browser: browserName, headless, userDataDir };
     this.registerExistingPages();
-    this.context.on("page", (page) => {
-      this.idFor(page);
-      this.trackPage(page);
-      this.activePage = page;
-    });
+    this.context.on("page", (page) => this.queuePageRegistration(page));
     this.activePage = this.context.pages()[0] ?? (await this.context.newPage());
     this.idFor(this.activePage);
     return this.activePage;
   }
 
   async getPage(): Promise<Page> {
+    await this.waitForPageRegistrations();
     const owner = this.currentOwner();
+    const active = owner ? this.activePages.get(owner) : undefined;
+    if (active && !active.isClosed()) return active;
     const owned = this.pageForOwner(owner);
-    if (owned) return owned;
+    if (owned) {
+      if (owner) this.activePages.set(owner, owned);
+      return owned;
+    }
     if (!this.context || !this.activePage || this.activePage.isClosed()) {
       await this.start(this.options);
     }
@@ -272,6 +308,7 @@ export class BrowserManager {
   }
 
   async listPages(): Promise<PageInfo[]> {
+    await this.waitForPageRegistrations();
     if (!this.context) return [];
     this.registerExistingPages();
     const owner = this.currentOwner();
@@ -317,6 +354,13 @@ export class BrowserManager {
       (page) => !page.isClosed() && this.pageOwners.get(page) === owner,
     ) ?? [];
     await Promise.all(pages.map((page) => page.close().catch(() => undefined)));
+    const routes = this._routeRules.filter((rule) => rule.owner === owner);
+    for (const rule of routes) {
+      await this.context?.unroute(rule.urlPattern, rule.handler).catch(() => undefined);
+    }
+    this._routeRules = this._routeRules.filter((rule) => rule.owner !== owner);
+    this._networkRequests = this._networkRequests.filter((entry) => entry.owner !== owner);
+    this._consoleMessages = this._consoleMessages.filter((entry) => entry.owner !== owner);
     this.activePages.delete(owner);
     if (this.activePage && pages.includes(this.activePage)) {
       this.activePage = this.context?.pages().find((page) => !page.isClosed());
@@ -325,6 +369,7 @@ export class BrowserManager {
   }
 
   async status(): Promise<BrowserStatus> {
+    await this.waitForPageRegistrations();
     const owner = this.currentOwner();
     const active = owner ? this.activePages.get(owner) ?? this.pageForOwner(owner) : this.activePage;
     const running = !!this.context && !!active && !active.isClosed();
@@ -382,7 +427,8 @@ export class BrowserManager {
     this.trackedPages.add(page);
     page.on("request", (req) => {
       this._networkRequests.push({
-        id: String(this._networkRequests.length + 1),
+        owner: this.pageOwners.get(page),
+        id: String(this.nextNetworkRequestId++),
         url: redactDataUrl(req.url()),
         method: req.method(),
         type: req.resourceType(),
@@ -394,7 +440,14 @@ export class BrowserManager {
     page.on("response", (res) => {
       const req = res.request();
       const reqUrl = redactDataUrl(req.url());
-      const existing = this._networkRequests.find((e) => e.url === reqUrl && e.method === req.method() && !e.status);
+      const owner = this.pageOwners.get(page);
+      const existing = this._networkRequests.find(
+        (entry) =>
+          entry.owner === owner &&
+          entry.url === reqUrl &&
+          entry.method === req.method() &&
+          !entry.status,
+      );
       if (existing) {
         existing.status = res.status();
         existing.statusText = res.statusText();
@@ -403,6 +456,7 @@ export class BrowserManager {
     });
     page.on("console", (msg) => {
       this._consoleMessages.push({
+        owner: this.pageOwners.get(page),
         type: msg.type(),
         text: redactSecrets(msg.text()),
         timestamp: Date.now(),
@@ -416,61 +470,77 @@ export class BrowserManager {
     if (!this.context) throw new Error("Browser context not available");
     const urlPattern = opts.urlPattern ?? "**/*";
     const types = opts.resourceTypes?.length ? new Set(opts.resourceTypes) : null;
-    const id = `route${this._routeRules.length + 1}`;
-    const handler = (route: Route) =>
-      !types || types.has(route.request().resourceType()) ? route.abort() : route.continue();
+    const id = `route${this.nextRouteId++}`;
+    const owner = this.currentOwner();
+    const handler = (route: Route) => {
+      if (owner && this.ownerForRoute(route) !== owner) return route.fallback();
+      return !types || types.has(route.request().resourceType()) ? route.abort() : route.fallback();
+    };
     await this.context.route(urlPattern, handler);
-    this._routeRules.push({ id, kind: "block", urlPattern, resourceTypes: opts.resourceTypes, handler });
+    this._routeRules.push({ id, kind: "block", urlPattern, resourceTypes: opts.resourceTypes, owner, handler });
     return this.listRoutes();
   }
 
   async addMockRoute(opts: { urlPattern: string; status?: number; body?: string; contentType?: string }): Promise<RouteRule[]> {
     await this.getPage();
     if (!this.context) throw new Error("Browser context not available");
-    const id = `route${this._routeRules.length + 1}`;
-    const handler = (route: Route) =>
-      route.fulfill({
+    const id = `route${this.nextRouteId++}`;
+    const owner = this.currentOwner();
+    const handler = (route: Route) => {
+      if (owner && this.ownerForRoute(route) !== owner) return route.fallback();
+      return route.fulfill({
         status: opts.status ?? 200,
         body: opts.body ?? "",
         contentType: opts.contentType ?? "text/plain",
       });
+    };
     await this.context.route(opts.urlPattern, handler);
-    this._routeRules.push({ id, kind: "mock", urlPattern: opts.urlPattern, status: opts.status ?? 200, handler });
+    this._routeRules.push({ id, kind: "mock", urlPattern: opts.urlPattern, status: opts.status ?? 200, owner, handler });
     return this.listRoutes();
   }
 
   async clearRoutes(): Promise<number> {
-    const count = this._routeRules.length;
+    const owner = this.currentOwner();
+    const rules = this._routeRules.filter((rule) => !owner || rule.owner === owner);
+    const count = rules.length;
     if (this.context) {
-      for (const rule of this._routeRules) {
+      for (const rule of rules) {
         await this.context.unroute(rule.urlPattern, rule.handler).catch(() => undefined);
       }
     }
-    this._routeRules = [];
+    this._routeRules = owner ? this._routeRules.filter((rule) => rule.owner !== owner) : [];
     return count;
   }
 
   listRoutes(): RouteRule[] {
-    return this._routeRules.map(({ handler, ...rule }) => rule);
+    const owner = this.currentOwner();
+    return this._routeRules
+      .filter((rule) => !owner || rule.owner === owner)
+      .map(({ handler, owner: _owner, ...rule }) => rule);
   }
 
   getNetworkRequests(activeOnly?: boolean): NetworkRequest[] {
     this._networkRequests = this._networkRequests.slice(-500);
-    if (activeOnly) return this._networkRequests.filter((e) => !e.status);
-    return this._networkRequests;
+    const owner = this.currentOwner();
+    const requests = this._networkRequests.filter((entry) => !owner || entry.owner === owner);
+    const filtered = activeOnly ? requests.filter((entry) => !entry.status) : requests;
+    return filtered.map(({ owner: _owner, ...entry }) => entry);
   }
 
   getConsoleMessages(): ConsoleMessage[] {
     this._consoleMessages = this._consoleMessages.slice(-200);
-    return this._consoleMessages;
+    const owner = this.currentOwner();
+    return this._consoleMessages
+      .filter((entry) => !owner || entry.owner === owner)
+      .map(({ owner: _owner, ...entry }) => entry);
   }
 
   getNetworkRequestByIndex(index: number): NetworkRequest | undefined {
-    return this._networkRequests[index];
+    return this.getNetworkRequests()[index];
   }
 
   getNetworkRequestById(id: string): NetworkRequest | undefined {
-    return this._networkRequests.find((request) => request.id === id);
+    return this.getNetworkRequests().find((request) => request.id === id);
   }
 
   async close(): Promise<{ videos: string[] }> {
@@ -497,6 +567,9 @@ export class BrowserManager {
     this.activePages.clear();
     this.pageOwners = new WeakMap<Page, string>();
     this.nextPageId = 1;
+    this.nextRouteId = 1;
+    this.nextNetworkRequestId = 1;
+    this.pageRegistrations.clear();
     this._routeRules = [];
     return { videos };
   }
