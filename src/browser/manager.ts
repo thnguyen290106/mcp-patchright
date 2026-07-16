@@ -1,15 +1,16 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdir, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import {
-  chromium,
-  firefox,
-  webkit,
-  devices,
   type Browser,
   type BrowserContext,
+  chromium,
+  devices,
+  firefox,
   type Page,
   type Route,
+  webkit,
 } from "patchright";
 import { redactDataUrl, redactSecrets } from "../util/redact.js";
 
@@ -88,6 +89,7 @@ export interface BrowserStatus {
 
 const DEFAULT_PROFILE_DIR = join(homedir(), ".maestro", "stealth-playwright-mcp", "profiles", "default");
 const DEFAULT_VIDEO_DIR = join(homedir(), ".maestro", "stealth-playwright-mcp", "videos");
+const ownerStorage = new AsyncLocalStorage<string | undefined>();
 
 export class BrowserManager {
   constructor(private readonly defaultOptions: StartOptions = {}) {}
@@ -95,6 +97,8 @@ export class BrowserManager {
   private browser?: Browser;
   private context?: BrowserContext;
   private activePage?: Page;
+  private activePages = new Map<string, Page>();
+  private pageOwners = new WeakMap<Page, string>();
   private pageIds = new WeakMap<Page, string>();
   private trackedPages = new WeakSet<Page>();
   private nextPageId = 1;
@@ -106,13 +110,52 @@ export class BrowserManager {
   private _consoleMessages: ConsoleMessage[] = [];
   private _routeRules: (RouteRule & { handler: (route: Route) => unknown })[] = [];
 
+  runAsOwner<T>(owner: string | undefined, fn: () => Promise<T>): Promise<T> {
+    return ownerStorage.run(owner, fn);
+  }
+
+  private currentOwner(): string | undefined {
+    return ownerStorage.getStore();
+  }
+
+  private pageForOwner(owner = this.currentOwner()): Page | undefined {
+    if (!owner) return undefined;
+    return this.context?.pages().find(
+      (page) => !page.isClosed() && this.pageOwners.get(page) === owner,
+    );
+  }
+
+  private claimPage(page: Page, owner = this.currentOwner()): Page {
+    if (!owner) return page;
+    const existing = this.pageForOwner(owner);
+    if (existing) return existing;
+    const currentOwner = this.pageOwners.get(page);
+    if (currentOwner && currentOwner !== owner) return page;
+    this.pageOwners.set(page, owner);
+    this.activePages.set(owner, page);
+    return page;
+  }
+
+  private availablePage(): Page | undefined {
+    return this.context?.pages().find(
+      (page) => !page.isClosed() && !this.pageOwners.has(page),
+    );
+  }
+
   async start(options: StartOptions = {}): Promise<Page> {
-    if (this.context && this.activePage && !this.activePage.isClosed()) return this.activePage;
-    if (this.startPromise) return this.startPromise;
+    const owner = this.currentOwner();
+    const owned = this.pageForOwner(owner);
+    if (owned) return owned;
+    if (!owner && this.context && this.activePage && !this.activePage.isClosed()) return this.activePage;
+    if (this.startPromise) {
+      await this.startPromise;
+      return this.getPage();
+    }
 
     this.startPromise = this.startFresh(options);
     try {
-      return await this.startPromise;
+      await this.startPromise;
+      return this.getPage();
     } finally {
       this.startPromise = undefined;
     }
@@ -197,8 +240,19 @@ export class BrowserManager {
   }
 
   async getPage(): Promise<Page> {
-    if (!this.context || !this.activePage || this.activePage.isClosed()) return this.start(this.options);
-    return this.activePage;
+    const owner = this.currentOwner();
+    const owned = this.pageForOwner(owner);
+    if (owned) return owned;
+    if (!this.context || !this.activePage || this.activePage.isClosed()) {
+      await this.start(this.options);
+    }
+    if (owner) {
+      const page = this.availablePage() ?? (await this.context!.newPage());
+      this.idFor(page);
+      this.trackPage(page);
+      return this.claimPage(page, owner);
+    }
+    return this.activePage!;
   }
 
   async newPage(url?: string): Promise<PageInfo> {
@@ -207,6 +261,12 @@ export class BrowserManager {
     const page = await this.context.newPage();
     this.activePage = page;
     this.idFor(page);
+    this.trackPage(page);
+    const owner = this.currentOwner();
+    if (owner) {
+      this.pageOwners.set(page, owner);
+      this.activePages.set(owner, page);
+    }
     if (url) await page.goto(url, { waitUntil: "domcontentloaded", timeout: 30_000 });
     return this.pageInfo(page);
   }
@@ -214,13 +274,21 @@ export class BrowserManager {
   async listPages(): Promise<PageInfo[]> {
     if (!this.context) return [];
     this.registerExistingPages();
-    return Promise.all(this.context.pages().filter((page) => !page.isClosed()).map((page) => this.pageInfo(page)));
+    const owner = this.currentOwner();
+    return Promise.all(
+      this.context
+        .pages()
+        .filter((page) => !page.isClosed() && (!owner || this.pageOwners.get(page) === owner))
+        .map((page) => this.pageInfo(page)),
+    );
   }
 
   async switchPage(pageId: string): Promise<PageInfo> {
     const page = this.findPage(pageId);
     if (!page) throw new Error(`Unknown page id: ${pageId}`);
     this.activePage = page;
+    const owner = this.currentOwner();
+    if (owner) this.activePages.set(owner, page);
     await page.bringToFront().catch(() => undefined);
     return this.pageInfo(page);
   }
@@ -230,21 +298,43 @@ export class BrowserManager {
     if (!page) throw new Error(`Unknown page id: ${pageId}`);
     const closedId = this.idFor(page);
     await page.close().catch(() => undefined);
-    if (this.activePage === page) {
-      this.activePage = this.context?.pages().find((candidate) => !candidate.isClosed());
+    const owner = this.currentOwner();
+    if (owner) {
+      if (this.activePages.get(owner) === page) {
+        const next = this.pageForOwner(owner);
+        if (next) this.activePages.set(owner, next);
+        else this.activePages.delete(owner);
+      }
+      const active = this.activePages.get(owner);
+      return active && !active.isClosed() ? this.pageInfo(active) : { ok: true, closed: closedId };
     }
+    if (this.activePage === page) this.activePage = this.context?.pages().find((candidate) => !candidate.isClosed());
     return this.activePage && !this.activePage.isClosed() ? this.pageInfo(this.activePage) : { ok: true, closed: closedId };
   }
 
+  async closeOwnerPages(owner: string): Promise<number> {
+    const pages = this.context?.pages().filter(
+      (page) => !page.isClosed() && this.pageOwners.get(page) === owner,
+    ) ?? [];
+    await Promise.all(pages.map((page) => page.close().catch(() => undefined)));
+    this.activePages.delete(owner);
+    if (this.activePage && pages.includes(this.activePage)) {
+      this.activePage = this.context?.pages().find((page) => !page.isClosed());
+    }
+    return pages.length;
+  }
+
   async status(): Promise<BrowserStatus> {
-    const running = !!this.context && !!this.activePage && !this.activePage.isClosed();
+    const owner = this.currentOwner();
+    const active = owner ? this.activePages.get(owner) ?? this.pageForOwner(owner) : this.activePage;
+    const running = !!this.context && !!active && !active.isClosed();
     let title: string | undefined;
     let url: string | undefined;
     let activePageId: string | undefined;
-    if (running && this.activePage) {
-      url = this.activePage.url();
-      title = await this.activePage.title().catch(() => undefined);
-      activePageId = this.idFor(this.activePage);
+    if (running && active) {
+      url = active.url();
+      title = await active.title().catch(() => undefined);
+      activePageId = this.idFor(active);
     }
     return {
       running,
@@ -256,7 +346,10 @@ export class BrowserManager {
       activePageId,
       url,
       title,
-      pages: this.context?.pages().filter((page) => !page.isClosed()).length ?? 0,
+      pages:
+        this.context?.pages().filter(
+          (page) => !page.isClosed() && (!owner || this.pageOwners.get(page) === owner),
+        ).length ?? 0,
       recording: !!this.videoDir,
       videoDir: this.videoDir,
     };
@@ -265,7 +358,8 @@ export class BrowserManager {
   /** Path of the in-progress video for the active page. File is finalized when the page/context closes. */
   async videoInfo(): Promise<{ recording: boolean; dir?: string; pendingFile?: string }> {
     if (!this.videoDir) return { recording: false };
-    const page = this.activePage && !this.activePage.isClosed() ? this.activePage : undefined;
+    const owner = this.currentOwner();
+    const page = (owner ? this.activePages.get(owner) : this.activePage) ?? undefined;
     const video = page?.video();
     const pendingFile = video ? await video.path().catch(() => undefined) : undefined;
     return { recording: true, dir: this.videoDir, pendingFile };
@@ -400,6 +494,8 @@ export class BrowserManager {
     this.videoDir = undefined;
     this.pageIds = new WeakMap<Page, string>();
     this.trackedPages = new WeakSet<Page>();
+    this.activePages.clear();
+    this.pageOwners = new WeakMap<Page, string>();
     this.nextPageId = 1;
     this._routeRules = [];
     return { videos };
@@ -426,13 +522,20 @@ export class BrowserManager {
   }
 
   private findPage(pageId: string): Page | undefined {
-    return this.context?.pages().find((page) => !page.isClosed() && this.idFor(page) === pageId);
+    const owner = this.currentOwner();
+    return this.context?.pages().find(
+      (page) =>
+        !page.isClosed() &&
+        this.idFor(page) === pageId &&
+        (!owner || this.pageOwners.get(page) === owner),
+    );
   }
 
   private async pageInfo(page: Page): Promise<PageInfo> {
+    const owner = this.currentOwner();
     return {
       id: this.idFor(page),
-      active: page === this.activePage,
+      active: page === (owner ? this.activePages.get(owner) : this.activePage),
       closed: page.isClosed(),
       url: page.url(),
       title: await page.title().catch(() => undefined),

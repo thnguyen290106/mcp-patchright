@@ -44,6 +44,7 @@ mcp-patchright --port 9321 --host 127.0.0.1
 - **3 transports** — stdio, SSE, Streamable HTTP (`/mcp`)
 - **Persistent profiles** — real Chrome profile, reuse across sessions
 - **Multi-page** — tab management (new, list, switch, close)
+- **Owner-scoped HTTP sessions** — isolate tabs per caller with `owner` query/header
 - **CDP attach** — control an already-running Chrome
 - **Network tracking + interception** — request list/detail, offline toggle, block/mock routes
 - **Session import/export** — `browser_storage_save` / `browser_storage_load` (cookies + localStorage)
@@ -123,6 +124,14 @@ Full comparison HTML in [/docs/tool-comparison.html](docs/tool-comparison.html).
 - `browser_close`
 
 ## Development
+
+### Owner-scoped HTTP sessions
+
+When running HTTP mode with a shared persistent profile, pass a stable owner on
+the MCP URL (`?owner=<id>`) or with the `X-Browser-Owner` header. Page listing,
+switching, navigation, and closing are restricted to that owner's tabs. Delete
+`/owners?owner=<id>` to close all tabs owned by one caller without stopping the
+browser or clearing the profile.
 
 ```bash
 npm install
