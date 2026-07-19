@@ -294,6 +294,35 @@ export const storageKeyDeleteSchema = z.object({
   key: z.string().min(1),
 });
 
+// --- Passkeys / virtual WebAuthn authenticator ---
+export const passkeyCreateSchema = z.object({
+  rpId: z.string().min(1),
+  id: z.string().min(1).optional(),
+  userHandle: z.string().min(1).optional(),
+  privateKey: z.string().min(1).optional(),
+  publicKey: z.string().min(1).optional(),
+  includePrivateKey: z.boolean().optional(),
+}).superRefine((value, ctx) => {
+  const supplied = [value.id, value.userHandle, value.privateKey, value.publicKey]
+    .filter((item) => item !== undefined).length;
+  if (supplied !== 0 && supplied !== 4) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Provide all of id, userHandle, privateKey, and publicKey when importing a passkey",
+    });
+  }
+});
+
+export const passkeyListSchema = z.object({
+  rpId: z.string().min(1).optional(),
+  id: z.string().min(1).optional(),
+  includePrivateKey: z.boolean().optional(),
+});
+
+export const passkeyDeleteSchema = z.object({
+  id: z.string().min(1),
+});
+
 // --- Video recording ---
 export const videoSaveSchema = z.object({
   path: z.string().optional(),

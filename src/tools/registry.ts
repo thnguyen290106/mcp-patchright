@@ -629,6 +629,48 @@ export const tools: Tool[] = [
     inputSchema: { type: "object", properties: {} },
   },
   {
+    name: "browser_passkey_install",
+    description: "Install Patchright's virtual WebAuthn authenticator in the current browser context. Call before a page first uses navigator.credentials.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "browser_passkey_create",
+    description: "Generate or import a virtual passkey. To import, provide all four key-material fields. Private keys are omitted unless includePrivateKey=true.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        rpId: { type: "string", description: "Relying-party id, usually the site's effective domain." },
+        id: { type: "string", description: "Base64url credential id." },
+        userHandle: { type: "string", description: "Base64url user handle." },
+        privateKey: { type: "string", description: "Base64url PKCS#8 DER private key." },
+        publicKey: { type: "string", description: "Base64url SPKI DER public key." },
+        includePrivateKey: { type: "boolean", description: "Return private key material. Default false." },
+      },
+      required: ["rpId"],
+    },
+  },
+  {
+    name: "browser_passkey_list",
+    description: "List virtual passkeys, optionally filtered by rpId or credential id. Private keys are omitted unless includePrivateKey=true.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        rpId: { type: "string" },
+        id: { type: "string", description: "Base64url credential id." },
+        includePrivateKey: { type: "boolean", description: "Return private key material. Default false." },
+      },
+    },
+  },
+  {
+    name: "browser_passkey_delete",
+    description: "Delete one virtual passkey by its base64url credential id.",
+    inputSchema: {
+      type: "object",
+      properties: { id: { type: "string" } },
+      required: ["id"],
+    },
+  },
+  {
     name: "browser_video_save",
     description: "Direct the active page's session recording to a specific output path (requires the session to have been started with recordVideo). The .webm finalizes when the page or browser closes. Without a path, returns the pending video location.",
     inputSchema: {

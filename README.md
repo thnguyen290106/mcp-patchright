@@ -1,6 +1,6 @@
 # mcp-patchright
 
-🛡️ Undetectable browser MCP server — 59 tools, Patchright-powered, zero CDP fingerprint.
+🛡️ Undetectable browser MCP server — 64 tools, Patchright-powered, zero CDP fingerprint.
 
 [![npm]](https://npmjs.com/mcp-patchright) [![MCP]](https://modelcontextprotocol.io)
 
@@ -40,7 +40,7 @@ mcp-patchright --port 9321 --host 127.0.0.1
 
 ## Features
 
-- **41 MCP tools** — full browser automation surface
+- **64 MCP tools** — full browser automation surface
 - **3 transports** — stdio, SSE, Streamable HTTP (`/mcp`)
 - **Persistent profiles** — real Chrome profile, reuse across sessions
 - **Multi-page** — tab management (new, list, switch, close)
@@ -58,6 +58,7 @@ mcp-patchright --port 9321 --host 127.0.0.1
 - **Stealth profiles** — proxy / geolocation / locale / timezone / colorScheme
 - **Console capture** — real-time console message stream
 - **Fingerprint check** — `browser_fingerprint_check` diagnostics
+- **Virtual passkeys** — create, import, list, and delete WebAuthn credentials with private keys redacted by default
 
 ## Tools
 
@@ -117,6 +118,10 @@ Full comparison HTML in [/docs/tool-comparison.html](docs/tool-comparison.html).
 - `browser_sessionstorage_set`
 - `browser_sessionstorage_delete`
 - `browser_sessionstorage_clear`
+- `browser_passkey_install`
+- `browser_passkey_create`
+- `browser_passkey_list`
+- `browser_passkey_delete`
 - `browser_video_save`
 - `browser_highlight`
 - `browser_hide_highlight`
