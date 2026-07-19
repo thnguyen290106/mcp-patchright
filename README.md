@@ -144,6 +144,18 @@ npm run build
 node dist/index.js
 ```
 
+### Release
+
+Install the matching Chromium build once, then prepare a release from the exact
+dependency versions in `package-lock.json`, run the full verification suite,
+and inspect the package without publishing it:
+
+```bash
+npx patchright install chromium
+npm run release:check
+npm publish
+```
+
 By default, `browser_start` launches Chromium via patchright as headed real Chrome with a persistent profile at:
 
 ```text
