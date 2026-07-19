@@ -28,6 +28,9 @@ import {
   networkStateSchema,
   newPageSchema,
   pageIdSchema,
+  passkeyCreateSchema,
+  passkeyDeleteSchema,
+  passkeyListSchema,
   pressSchema,
   resizeSchema,
   routeBlockSchema,
@@ -74,6 +77,12 @@ function image(data: Buffer): ToolResult {
   return {
     content: [{ type: "image", data: data.toString("base64"), mimeType: "image/png" }],
   };
+}
+
+function safePasskey<T extends { privateKey: string }>(credential: T, includePrivateKey = false) {
+  if (includePrivateKey) return credential;
+  const { privateKey: _privateKey, ...safe } = credential;
+  return { ...safe, hasPrivateKey: true };
 }
 
 // CDP Page.printToPDF takes paper dimensions in inches.
@@ -654,6 +663,33 @@ export async function handleTool(manager: BrowserManager, name: string, args: un
       const page = await manager.getPage();
       await page.evaluate((s: string) => ((window as any)[s] as Storage).clear(), store);
       return text({ ok: true });
+    }
+    case "browser_passkey_install": {
+      const page = await manager.getPage();
+      await page.context().credentials.install();
+      return text({ ok: true, installed: true });
+    }
+    case "browser_passkey_create": {
+      const parsed = passkeyCreateSchema.parse(args);
+      const page = await manager.getPage();
+      const { rpId, includePrivateKey, ...material } = parsed;
+      const credential = await page.context().credentials.create(rpId, material);
+      return text({ ok: true, credential: safePasskey(credential, includePrivateKey) });
+    }
+    case "browser_passkey_list": {
+      const parsed = passkeyListSchema.parse(args ?? {});
+      const page = await manager.getPage();
+      const { includePrivateKey, ...filter } = parsed;
+      const credentials = await page.context().credentials.get(filter);
+      return text({
+        credentials: credentials.map((credential) => safePasskey(credential, includePrivateKey)),
+      });
+    }
+    case "browser_passkey_delete": {
+      const parsed = passkeyDeleteSchema.parse(args);
+      const page = await manager.getPage();
+      await page.context().credentials.delete(parsed.id);
+      return text({ ok: true, deleted: parsed.id });
     }
     case "browser_video_save": {
       const parsed = videoSaveSchema.parse(args ?? {});

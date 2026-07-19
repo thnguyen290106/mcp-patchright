@@ -1,7 +1,7 @@
 {
   "name": "mcp-patchright",
-  "version": "0.1.10",
-  "description": "Stealth browser automation MCP server powered by Patchright. 60 tools, HTTP/SSE/Streamable HTTP transports, persistent profiles, multi-page support, CDP attach, network interception, granular cookie/local/session storage, storage import/export, video recording, element highlight, token-efficient snapshots + browser_find, device/mobile emulation, PDF, proxy/geo profiles, authenticated API requests, iframe + text/HTML extraction.",
+  "version": "0.1.11",
+  "description": "Stealth browser automation MCP server powered by Patchright. 64 tools, HTTP/SSE/Streamable HTTP transports, persistent profiles, multi-page support, CDP attach, network interception, granular cookie/local/session storage, virtual passkeys, storage import/export, video recording, element highlight, token-efficient snapshots + browser_find, device/mobile emulation, PDF, proxy/geo profiles, authenticated API requests, iframe + text/HTML extraction.",
   "type": "module",
   "main": "dist/index.js",
   "exports": {
@@ -34,7 +34,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
     "express": "^5.1.0",
-    "patchright": "^1.60.0",
+    "patchright": "1.61.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -51,7 +51,9 @@
     "lint": "biome lint src",
     "lint:fix": "biome lint --write src",
     "test:humanize": "node test/humanize.test.mjs",
+    "test:patchright": "node test/patchright-compat.test.mjs",
     "test:owners": "npm run build && node test/owner-scope.test.mjs",
+    "test": "npm run build && npm run test:humanize && npm run test:patchright && node test/owner-scope.test.mjs",
     "prepublishOnly": "npm run build"
   }
 }
