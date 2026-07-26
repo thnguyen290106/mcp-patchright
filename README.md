@@ -3,15 +3,33 @@
 [![npm version](https://img.shields.io/npm/v/mcp-patchright)](https://www.npmjs.com/package/mcp-patchright)
 [![license](https://img.shields.io/npm/l/mcp-patchright)](https://www.npmjs.com/package/mcp-patchright)
 
-A Patchright-powered browser automation server for the
-[Model Context Protocol](https://modelcontextprotocol.io). It gives agents 64
-tools for navigation, page interaction, network inspection, storage, passkeys,
-video, PDF export, and more.
+A Patchright-powered, Playwright-style [Model Context Protocol](https://modelcontextprotocol.io)
+browser server with 64 tools for navigation, interaction, network inspection,
+storage, passkeys, media, and more.
+Use stdio with one agent, or HTTP when several agents need one persistent Chrome
+profile while keeping their tabs owner-isolated.
 
-Patchright removes several automation signals used by stock Playwright, such as
-`Runtime.enable`, `Console.enable`, and `--enable-automation`. This reduces common
-fingerprinting signals; it does not guarantee that a site will accept automated
-traffic. Respect site terms, robots policies, and applicable law.
+```mermaid
+flowchart LR
+  A["Agent A<br/>owner=research"] --> S["mcp-patchright<br/>64 MCP tools"]
+  B["Agent B<br/>owner=ops"] --> S
+  S --> C["One shared Chrome<br/>persistent profile"]
+  C --> T1["Research tabs"]
+  C --> T2["Ops tabs"]
+```
+
+Patchright reduces several common signals emitted by stock Playwright. This is
+signal reduction, not a universal bypass: sites can use many other indicators,
+and acceptance of automated traffic is never guaranteed.
+
+| Signal | Stock Playwright | Patchright behavior | Qualification |
+|---|---|---|---|
+| CDP `Runtime.enable` | Used for page evaluation | Avoided by Patchright | Fewer common CDP signals |
+| CDP `Console.enable` | Used for console events | Avoided | Fewer common CDP signals |
+| `--enable-automation` | Added to Chromium launch | Removed | Does not hide all automation |
+| `navigator.webdriver` | Commonly exposed | Mitigated with `AutomationControlled` changes | Site/browser dependent |
+
+Respect site terms, robots policies, and applicable law.
 
 ## Quick start
 
@@ -41,9 +59,10 @@ npm install --global mcp-patchright
 mcp-patchright --help
 ```
 
-## What you get
+## Capabilities
 
-- Persistent browser profiles and multi-tab control
+- Persistent browser profiles and multi-tab control; HTTP owners get isolated
+  page, popup, network, console, and route state inside one shared browser
 - Token-efficient accessibility snapshots plus targeted `browser_find`
 - CSS selector, aria-ref, and iframe-aware element actions
 - Request tracking, offline mode, request blocking, and response mocking
@@ -122,17 +141,18 @@ npx -y mcp-patchright --host 127.0.0.1 --port 9321
 - SSE: `http://127.0.0.1:9321/sse`
 - Health check: `http://127.0.0.1:9321/health`
 
-Every HTTP client must provide a stable owner using `?owner=<id>` or the
-`X-Browser-Owner` header. Owners isolate page access between callers. To close
-one owner's tabs without stopping the browser:
+Every HTTP client must provide a stable, authenticated-by-your-front-door owner
+identifier using `?owner=<id>` or the `X-Browser-Owner` header. The owner value
+selects that caller's isolated tab group; it is not authentication by itself. To
+close one owner's tabs without stopping the shared browser:
 
 ```bash
 curl -X DELETE "http://127.0.0.1:9321/owners?owner=my-agent"
 ```
 
-Keep the default loopback host unless you have added authentication and network
-controls in front of the server. Browser tools can access sensitive profiles and
-arbitrary sites.
+Keep the default loopback host unless you have added authentication, TLS, and
+network controls in front of the server. Browser tools can access sensitive
+profiles and arbitrary sites. Do not expose HTTP directly to an untrusted network.
 
 Run `mcp-patchright --help` for all CLI options, including headless mode, device
 emulation, and output-size limits.
