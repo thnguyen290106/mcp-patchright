@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 import type { Server as HttpServer } from "node:http";
+import { createRequire } from "node:module";
 import { createMcpExpressApp } from "@modelcontextprotocol/sdk/server/express.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
@@ -11,6 +12,10 @@ import type { Request, Response } from "express";
 import { BrowserManager, type StartOptions } from "./browser/manager.js";
 import { handleTool } from "./tools/handlers.js";
 import { tools } from "./tools/registry.js";
+
+const { version: packageVersion } = createRequire(import.meta.url)("../package.json") as {
+  version: string;
+};
 
 type CliOptions = {
   host: string;
@@ -127,7 +132,7 @@ function createServer(
   const server = new Server(
     {
       name: "mcp-patchright",
-      version: "0.1.0",
+      version: packageVersion,
     },
     {
       capabilities: {

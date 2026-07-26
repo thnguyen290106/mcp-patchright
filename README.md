@@ -1,215 +1,198 @@
 # mcp-patchright
 
-🛡️ Undetectable browser MCP server — 64 tools, Patchright-powered, zero CDP fingerprint.
+[![npm version](https://img.shields.io/npm/v/mcp-patchright)](https://www.npmjs.com/package/mcp-patchright)
+[![license](https://img.shields.io/npm/l/mcp-patchright)](https://www.npmjs.com/package/mcp-patchright)
 
-[![npm]](https://npmjs.com/mcp-patchright) [![MCP]](https://modelcontextprotocol.io)
+A Patchright-powered browser automation server for the
+[Model Context Protocol](https://modelcontextprotocol.io). It gives agents 64
+tools for navigation, page interaction, network inspection, storage, passkeys,
+video, PDF export, and more.
 
-Passes Cloudflare / Akamai / Kasada / Datadome.
-
-## Why Patchright, not Playwright?
-
-| | Playwright | Patchright |
-|---|---|---|
-| `Runtime.enable` | ✅ sends (detectable) | ❌ removed |
-| `Console.enable` | ✅ sends | ❌ removed |
-| `--enable-automation` flag | ✅ present | ❌ removed |
-| `navigator.webdriver` | `true` | `false` / `undefined` |
-| Anti-bot evasion | ❌ | ✅ |
-
-See the [full comparison](#) for details.
+Patchright removes several automation signals used by stock Playwright, such as
+`Runtime.enable`, `Console.enable`, and `--enable-automation`. This reduces common
+fingerprinting signals; it does not guarantee that a site will accept automated
+traffic. Respect site terms, robots policies, and applicable law.
 
 ## Quick start
 
-```bash
-npm i -g mcp-patchright
-mcp-patchright --port 9321 --host 127.0.0.1
-```
+Requirements: Node.js 18 or newer and Google Chrome. The default browser session
+uses installed Chrome in headed mode with a persistent profile.
 
-### With Claude / GPT / agents
+Add the server to an MCP client:
 
 ```json
 {
   "mcpServers": {
     "patchright": {
       "command": "npx",
-      "args": ["mcp-patchright", "--port", "9321", "--host", "127.0.0.1"]
+      "args": ["-y", "mcp-patchright"]
     }
   }
 }
 ```
 
-## Features
+Restart the client, then ask the agent to call `browser_start` and
+`browser_navigate`.
 
-- **64 MCP tools** — full browser automation surface
-- **3 transports** — stdio, SSE, Streamable HTTP (`/mcp`)
-- **Persistent profiles** — real Chrome profile, reuse across sessions
-- **Multi-page** — tab management (new, list, switch, close)
-- **Owner-scoped HTTP sessions** — isolate tabs per caller with `owner` query/header
-- **CDP attach** — control an already-running Chrome
-- **Network tracking + interception** — request list/detail, offline toggle, block/mock routes
-- **Session import/export** — `browser_storage_save` / `browser_storage_load` (cookies + localStorage)
-- **Granular storage** — per-key cookie / localStorage / sessionStorage CRUD (`browser_cookie_*`, `browser_localstorage_*`, `browser_sessionstorage_*`)
-- **Authenticated API requests** — `browser_api_request` reuses session cookies (hybrid scraping)
-- **Text/HTML extraction** — `browser_get_visible_text` / `_html` (token-light)
-- **Iframe-aware** — pass `frameSelector` to any element tool (click/fill/type/hover/press/wait_for/select/drag) to act inside an iframe
-- **PDF export** — `browser_save_pdf` via CDP (works in headed/stealth mode)
-- **Video recording** — `browser_start` with `recordVideo`, `browser_video_save`; .webm flushed on `browser_close`
-- **Element highlight** — `browser_highlight` / `browser_hide_highlight` overlays for screenshots & recordings
-- **Stealth profiles** — proxy / geolocation / locale / timezone / colorScheme
-- **Console capture** — real-time console message stream
-- **Fingerprint check** — `browser_fingerprint_check` diagnostics
-- **Virtual passkeys** — create, import, list, and delete WebAuthn credentials with private keys redacted by default
-
-## Tools
-
-Full comparison HTML in [/docs/tool-comparison.html](docs/tool-comparison.html).
-
-- `browser_start`
-- `browser_status`
-- `browser_navigate`
-- `browser_new_page`
-- `browser_pages`
-- `browser_switch_page`
-- `browser_close_page`
-- `browser_snapshot`
-- `browser_take_screenshot`
-- `browser_click`
-- `browser_fill`
-- `browser_type`
-- `browser_hover`
-- `browser_press_key`
-- `browser_wait_for`
-- `browser_evaluate`
-- `browser_fingerprint_check`
-- `browser_navigate_back`
-- `browser_select_option`
-- `browser_handle_dialog`
-- `browser_file_upload`
-- `browser_network_requests`
-- `browser_network_request`
-- `browser_console_messages`
-- `browser_resize`
-- `browser_drag`
-- `browser_fill_form`
-- `browser_run_code_unsafe`
-- `browser_network_state_set`
-- `browser_api_request`
-- `browser_get_visible_text`
-- `browser_get_visible_html`
-- `browser_iframe_click`
-- `browser_iframe_fill`
-- `browser_route_block`
-- `browser_route_mock`
-- `browser_route_clear`
-- `browser_storage_save`
-- `browser_storage_load`
-- `browser_cookie_list`
-- `browser_cookie_get`
-- `browser_cookie_set`
-- `browser_cookie_delete`
-- `browser_cookie_clear`
-- `browser_localstorage_list`
-- `browser_localstorage_get`
-- `browser_localstorage_set`
-- `browser_localstorage_delete`
-- `browser_localstorage_clear`
-- `browser_sessionstorage_list`
-- `browser_sessionstorage_get`
-- `browser_sessionstorage_set`
-- `browser_sessionstorage_delete`
-- `browser_sessionstorage_clear`
-- `browser_passkey_install`
-- `browser_passkey_create`
-- `browser_passkey_list`
-- `browser_passkey_delete`
-- `browser_video_save`
-- `browser_highlight`
-- `browser_hide_highlight`
-- `browser_save_pdf`
-- `browser_close`
-
-## Development
-
-### Owner-scoped HTTP sessions
-
-HTTP mode requires a stable owner on
-the MCP URL (`?owner=<id>`) or with the `X-Browser-Owner` header. Page listing,
-switching, navigation, and closing are restricted to that owner's tabs. Delete
-`/owners?owner=<id>` to close all tabs owned by one caller without stopping the
-browser or clearing the profile.
+To install the command globally instead:
 
 ```bash
-npm install
-npm run build
-node dist/index.js
+npm install --global mcp-patchright
+mcp-patchright --help
 ```
 
-### Release
+## What you get
 
-Install the matching Chromium build once, then prepare a release from the exact
-dependency versions in `package-lock.json`, run the full verification suite,
-and inspect the package without publishing it:
+- Persistent browser profiles and multi-tab control
+- Token-efficient accessibility snapshots plus targeted `browser_find`
+- CSS selector, aria-ref, and iframe-aware element actions
+- Request tracking, offline mode, request blocking, and response mocking
+- Cookie, localStorage, sessionStorage, and full storage-state tools
+- Authenticated API requests that reuse browser cookies
+- Device/mobile emulation, proxy, locale, timezone, and geolocation options
+- Screenshots, PDF export, element highlights, and WebM recording
+- CDP attachment to an existing Chrome session
+- Virtual WebAuthn passkeys with private keys redacted by default
+
+## Typical agent workflow
+
+1. `browser_start`
+2. `browser_navigate`
+3. `browser_snapshot` or `browser_find`
+4. Use returned `[ref=eN]` values with tools such as `browser_click`,
+   `browser_fill`, and `browser_type`
+5. `browser_close`
+
+CSS selectors are also supported. Element tools accept exactly one of
+`selector` or `ref`; pass `frameSelector` when the target is inside an iframe.
+
+## Configuration
+
+`browser_start` accepts per-session settings. Common examples:
+
+```json
+{
+  "headless": true,
+  "device": "iPhone 15",
+  "locale": "en-US",
+  "timezoneId": "America/New_York"
+}
+```
+
+The defaults are:
+
+| Setting | Default |
+|---|---|
+| Browser | Patchright Chromium using the `chrome` channel |
+| Display | Headed |
+| Profile | `~/.maestro/stealth-playwright-mcp/profiles/default` |
+| Video directory | `~/.maestro/stealth-playwright-mcp/videos` |
+
+Override the profile with `browser_start.userDataDir`, the
+`--user-data-dir` CLI option, or `STEALTH_PLAYWRIGHT_USER_DATA_DIR`.
+
+### Attach to an existing Chrome
+
+Start Chrome with remote debugging and a separate profile:
 
 ```bash
-npx patchright install chromium
-npm run release:check
-npm publish
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.mcp-patchright/cdp-profile"
 ```
 
-By default, `browser_start` launches Chromium via patchright as headed real Chrome with a persistent profile at:
-
-```text
-~/.maestro/stealth-playwright-mcp/profiles/default
-```
-
-You can override it with the `userDataDir` tool argument or `STEALTH_PLAYWRIGHT_USER_DATA_DIR`.
-
-To attach to an already-running Chrome instead of launching one, start Chrome with remote debugging and pass `cdpEndpoint` to `browser_start`:
-
-```bash
-/Applications/Google\\ Chrome.app/Contents/MacOS/Google\\ Chrome \\
-  --remote-debugging-port=9222 \\
-  --user-data-dir=$HOME/.maestro/stealth-playwright-mcp/profiles/cdp
-```
+Then call:
 
 ```json
 { "cdpEndpoint": "http://127.0.0.1:9222" }
 ```
 
-`browser_snapshot` returns Playwright's AI aria snapshot. Use `[ref=eN]` values from that snapshot with `browser_click`, `browser_fill`, `browser_type`, `browser_hover`, `browser_press`, and `browser_wait_for` by passing `{ "ref": "eN" }`. CSS selectors remain supported via `{ "selector": "..." }`.
+Video recording is unavailable when attached over CDP.
 
-MCP config example:
+## HTTP mode
 
-```json
-{
-  "mcpServers": {
-    "stealth-playwright": {
-      "command": "node",
-      "args": ["/Users/maestrobot/stealth-playwright-mcp/dist/index.js"]
-    }
-  }
-}
+stdio is the simplest transport for a local MCP client. For a shared service,
+start Streamable HTTP and legacy SSE endpoints explicitly:
+
+```bash
+npx -y mcp-patchright --host 127.0.0.1 --port 9321
 ```
 
-## Direction
+- Streamable HTTP: `http://127.0.0.1:9321/mcp`
+- SSE: `http://127.0.0.1:9321/sse`
+- Health check: `http://127.0.0.1:9321/health`
 
-Shipped:
+Every HTTP client must provide a stable owner using `?owner=<id>` or the
+`X-Browser-Owner` header. Owners isolate page access between callers. To close
+one owner's tabs without stopping the browser:
 
-- ✅ persistent user data dirs
-- ✅ CDP attach to real Chrome
-- ✅ proxy / timezone / locale / geolocation profiles
-- ✅ accessibility snapshots for LLM-friendly page control
-- ✅ fingerprint diagnostics
-- ✅ network interception (block / mock)
-- ✅ session import/export (storageState)
-- ✅ PDF export
-- ✅ authenticated API requests (reuse browser cookies)
-- ✅ lightweight text/HTML extraction
-- ✅ iframe actions
+```bash
+curl -X DELETE "http://127.0.0.1:9321/owners?owner=my-agent"
+```
 
-Next:
+Keep the default loopback host unless you have added authentication and network
+controls in front of the server. Browser tools can access sensitive profiles and
+arbitrary sites.
 
-- rebrowser-playwright backend
-- codegen sessions
-- coordinate-based (vision) clicks
-- tracing / video recording
+Run `mcp-patchright --help` for all CLI options, including headless mode, device
+emulation, and output-size limits.
+
+## Tool catalog
+
+The server currently exposes 64 tools:
+
+- **Session and pages:** `browser_start`, `browser_status`, `browser_close`,
+  `browser_new_page`, `browser_pages`, `browser_switch_page`,
+  `browser_close_page`
+- **Navigation and discovery:** `browser_navigate`, `browser_navigate_back`,
+  `browser_snapshot`, `browser_find`, `browser_wait_for`,
+  `browser_get_visible_text`, `browser_get_visible_html`
+- **Interaction:** `browser_click`, `browser_fill`, `browser_type`,
+  `browser_hover`, `browser_press_key`, `browser_select_option`,
+  `browser_handle_dialog`, `browser_file_upload`, `browser_resize`,
+  `browser_drag`, `browser_fill_form`, `browser_iframe_click`,
+  `browser_iframe_fill`
+- **Execution and diagnostics:** `browser_evaluate`,
+  `browser_run_code_unsafe`, `browser_fingerprint_check`,
+  `browser_console_messages`
+- **Network:** `browser_network_requests`, `browser_network_request`,
+  `browser_network_state_set`, `browser_api_request`, `browser_route_block`,
+  `browser_route_mock`, `browser_route_clear`
+- **Session storage:** `browser_storage_save`, `browser_storage_load`
+- **Cookies:** `browser_cookie_list`, `browser_cookie_get`,
+  `browser_cookie_set`, `browser_cookie_delete`, `browser_cookie_clear`
+- **Web storage:** `browser_localstorage_list`, `browser_localstorage_get`,
+  `browser_localstorage_set`, `browser_localstorage_delete`,
+  `browser_localstorage_clear`, `browser_sessionstorage_list`,
+  `browser_sessionstorage_get`, `browser_sessionstorage_set`,
+  `browser_sessionstorage_delete`, `browser_sessionstorage_clear`
+- **Passkeys:** `browser_passkey_install`, `browser_passkey_create`,
+  `browser_passkey_list`, `browser_passkey_delete`
+- **Media and overlays:** `browser_take_screenshot`, `browser_save_pdf`,
+  `browser_video_save`, `browser_highlight`, `browser_hide_highlight`
+
+The MCP tool schemas contain the complete argument reference and are available
+to clients through tool discovery.
+
+## Development
+
+```bash
+git clone https://github.com/maestrojeong/mcp-patchright.git
+cd mcp-patchright
+npm install
+npm run build
+npm test
+```
+
+Useful commands:
+
+```bash
+npm run dev
+npm run lint
+npm run typecheck
+npm run release:check  # clean install, lint, tests, and npm dry-run
+```
+
+## License
+
+MIT
