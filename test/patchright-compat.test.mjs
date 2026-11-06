@@ -1,8 +1,9 @@
 // Patchright upgrade regression coverage.
 //
-// Patchright 1.60.1 fixed iframe execution-context handling and 1.60.2 fixed
-// visibility checks. Keep these behaviors covered before accepting future
-// dependency updates.
+// Patchright 1.60.1 fixed iframe execution-context handling, 1.60.2 fixed
+// visibility checks, and Patchright 1.64 (Playwright 1.64) moved the aria refs
+// returned by `ariaSnapshot({ mode: "ai" })` to the public `page.getByRef()`
+// API. Keep these behaviors covered before accepting future dependency updates.
 
 import { chromium } from "patchright";
 
@@ -43,6 +44,22 @@ try {
     "iframe locator click keeps execution context",
     (await inside.getAttribute("data-clicked")) === "yes",
   );
+
+  // The MCP snapshot/find/click/fill tools round-trip these ai-mode refs, so
+  // cover the public page.getByRef() path added in Patchright 1.64.
+  const aiSnapshot = await page.ariaSnapshot({ mode: "ai", timeout: 5_000 });
+  check("aria snapshot exposes ai-mode refs", /\[ref=e\d+\]/.test(aiSnapshot), aiSnapshot.slice(0, 160));
+  const visibleRef = aiSnapshot
+    .split("\n")
+    .find((line) => line.includes('button "Visible"'))
+    ?.match(/\[ref=(e\d+)\]/)?.[1];
+  check("aria snapshot includes the visible button ref", !!visibleRef, aiSnapshot.slice(0, 300));
+  if (visibleRef) {
+    const byRef = page.getByRef(visibleRef);
+    check("page.getByRef resolves an ai-mode ref", (await byRef.count()) === 1, `ref=${visibleRef}`);
+    await byRef.click();
+    check("page.getByRef locator is interactive", true);
+  }
 
   const credential = await context.credentials.create("example.test");
   check("passkey create returns key material", !!credential.id && !!credential.privateKey);

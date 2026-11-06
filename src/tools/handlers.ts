@@ -117,6 +117,13 @@ function distillSnapshot(snapshot: string, opts: { includeUrls?: boolean } = {})
 }
 
 function locatorFor(page: Page, target: { selector?: string; ref?: string; frameSelector?: string }): Locator {
+  // Patchright 1.64 (Playwright 1.64) exposes the aria refs produced by
+  // `ariaSnapshot({ mode: "ai" })` through the public page.getByRef() API.
+  // Prefer it over the internal `aria-ref=` selector engine; frame-scoped
+  // lookups and older patchright builds keep the selector-engine path.
+  if (target.ref && !target.frameSelector && typeof page.getByRef === "function") {
+    return page.getByRef(target.ref);
+  }
   const root = target.frameSelector ? page.frameLocator(target.frameSelector) : page;
   if (target.ref) return root.locator(`aria-ref=${target.ref}`);
   if (target.selector) return root.locator(target.selector);

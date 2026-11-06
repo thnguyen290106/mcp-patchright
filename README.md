@@ -33,7 +33,7 @@ Respect site terms, robots policies, and applicable law.
 
 ## Quick start
 
-Requirements: Node.js 18 or newer and Google Chrome. The default browser session
+Requirements: Node.js 20 or newer and Google Chrome. The default browser session
 uses installed Chrome in headed mode with a persistent profile.
 
 Add the server to an MCP client:
@@ -200,6 +200,7 @@ to clients through tool discovery.
 git clone https://github.com/maestrojeong/mcp-patchright.git
 cd mcp-patchright
 npm install
+npx patchright install chromium  # bundled browser used by the regression tests
 npm run build
 npm test
 ```
